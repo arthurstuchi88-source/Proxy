@@ -596,10 +596,15 @@ button{corder:0}
 .stat-card:hover{border-color:var(--border-purple);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(168,85,247,.3),transparent);opacity:0;transition:var(--transition)}
 .stat-card:hover::before{opacity:1}
-.stat-content{display:flex;flex-direction:column;gap:4px;min-width:0}
-.stat-label{font-size:11.5px;color:var(--text-muted);font-weight:500}
-.stat-value{font-size:15.5px;font-weight:700;color:var(--text-purple);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stat-icon{width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:center;color:var(--text-sub);transition:var(--transition);flex-shrink:0}
+	.stat-content{display:flex;flex-direction:column;gap:4px;min-width:0}
+	.stat-label{font-size:11.5px;color:var(--text-muted);font-weight:500}
+	.stat-value{font-size:15.5px;font-weight:700;color:var(--text-purple);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+	.ip-value-wrap{display:flex;align-items:center;gap:8px;min-width:0}
+	.ip-value-wrap .stat-value{min-width:0}
+	.ip-visibility-btn{display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,.03);color:var(--text-muted);cursor:pointer;transition:var(--transition);flex-shrink:0}
+	.ip-visibility-btn:hover{color:var(--primary-light);border-color:var(--border-purple);background:rgba(147,51,234,.1)}
+	.ip-visibility-btn svg{width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none}
+	.stat-icon{width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:center;color:var(--text-sub);transition:var(--transition);flex-shrink:0}
 .stat-card:hover .stat-icon{color:var(--primary-light);border-color:var(--border-purple);background:rgba(147,51,234,.1)}
 .stat-icon svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.8;fill:none}
 
@@ -786,7 +791,7 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>Kaze Bypass</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Plano</span><span class='stat-value' id='statPlan'>Remote Client</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Versao</span><span class='stat-value'>v2.0</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><polygon points='12 2 2 7 12 12 22 7 12 2'/><polyline points='2 17 12 22 22 17'/><polyline points='2 12 12 17 22 12'/></svg></div></div>"
-    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Seu IP</span><span class='stat-value' id='statIp'>-</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg></div></div>"
+	"<div class='stat-card'><div class='stat-content'><span class='stat-label'>Seu IP</span><div class='ip-value-wrap'><span class='stat-value' id='statIp'>-</span><button type='button' class='ip-visibility-btn' id='ipVisibilityBtn' onclick='toggleIpVisibility()' aria-label='Ocultar IP' title='Ocultar IP'><svg id='ipEyeIcon' viewBox='0 0 24 24'><path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z'/><circle cx='12' cy='12' r='2.5'/></svg></button></div></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg></div></div>"
     "</section>"
     "<div class='features-grid' id='modulos'>"
     "<section class='panel-card' id='mira'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg></div><h2 class='panel-card-title'>Mira Â· Precisao</h2></div>"
@@ -800,8 +805,9 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
     "<footer class='main-footer'><span class='footer-brand'>KAZE BYPASS</span><span class='footer-text-plain'>v2.0 Â· Security First</span></footer></main></div>"
     "<div class='toast' id='toast'></div>"
     "<script>"
-    "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
-    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';"
+	"let actualIp='-',ipHidden=false;function renderIp(){const el=document.getElementById('statIp'),btn=document.getElementById('ipVisibilityBtn');if(!el)return;el.textContent=ipHidden&&actualIp!=='-'?'•'.repeat(actualIp.length):actualIp;if(btn){btn.setAttribute('aria-label',ipHidden?'Mostrar IP':'Ocultar IP');btn.title=ipHidden?'Mostrar IP':'Ocultar IP'}}function toggleIpVisibility(){ipHidden=!ipHidden;renderIp()}"
+	"function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
+	"async function load(){try{const r=await fetch('/api/status');const d=await r.json();actualIp=d.ip||'-';renderIp();document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';"
     "const map={HS_NECK:'sw_hs_neck',PRECISION:'sw_PRECISION',BACKJUMPV1:'sw_backjump_v1',HIGH_SENSI:'sw_high_sensi',ZIG_ZAG_MOVE:'sw_zig_zag_move'};"
     "for(const k in map){const el=document.getElementById(map[k]);if(el)el.classList.toggle('on',!!d.config[k])}}catch(e){}}"
     "async function opt(feature,el){const next=!el.classList.contains('on');el.classList.toggle('on',next);try{const r=await fetch('/api/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feature:feature,value:next})});const d=await r.json();if(d.error)throw Error(d.error);toast('Modulo '+(next?'ativado':'desativado'))}catch(e){el.classList.toggle('on',next);toast(e.message,'danger')}}"
