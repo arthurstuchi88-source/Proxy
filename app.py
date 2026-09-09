@@ -26,18 +26,97 @@ PORT = int(os.environ.get('PORT', 10000))
 
 ADMIN_USER = "LEOMDZ"
 ADMIN_PASS = "OWNER"
-# Compatibilidade com as credenciais usadas pela interface Kaze recebida.
 INTERFACE_ADMIN_USER = "thx"
 INTERFACE_ADMIN_PASS = "00"
 
-# Data file paths
 DATA_FILE = os.path.join(BASE_DIR, "crx_data.json")
+BYPASS_FILE = os.path.join(BASE_DIR, "bypass_state.json")
 
 user_configs = {}
 registered_ips = {}
 generated_keys = {}
 key_expiry = {}
 
+# ==================== CONTROLE DO BYPASS ====================
+# MODOS:
+# "proxy" = Ativo (intercepta e injeta)
+# "off" = Desativado (redireciona para servidor original)
+
+bypass_state = {
+    "mode": "proxy",  # "proxy" ou "off"
+    "start_time": None,
+    "auto_off_minutes": 3,  # Desativa após 3 minutos
+    "installed_ips": []
+}
+
+def load_bypass_state():
+    global bypass_state
+    if os.path.exists(BYPASS_FILE):
+        try:
+            with open(BYPASS_FILE, 'r') as f:
+                bypass_state = json.load(f)
+            print(f"📋 BYPASS: {bypass_state['mode']}")
+        except:
+            pass
+    else:
+        save_bypass_state()
+
+def save_bypass_state():
+    try:
+        with open(BYPASS_FILE, 'w') as f:
+            json.dump(bypass_state, f, indent=2)
+    except Exception as e:
+        print(f"Error saving bypass state: {e}")
+
+def is_bypass_active():
+    return bypass_state.get("mode") == "proxy"
+
+def should_disable_bypass():
+    """Verifica se deve desativar o bypass automaticamente"""
+    if not is_bypass_active():
+        return False
+    
+    start_time = bypass_state.get("start_time")
+    if not start_time:
+        return False
+    
+    try:
+        start = datetime.fromisoformat(start_time)
+        elapsed = (datetime.now() - start).total_seconds() / 60
+        auto_off = bypass_state.get("auto_off_minutes", 3)
+        
+        if elapsed >= auto_off:
+            print(f"⏰ BYPASS DESATIVADO AUTOMATICAMENTE APÓS {elapsed:.1f} minutos")
+            return True
+    except:
+        pass
+    
+    return False
+
+def disable_bypass():
+    """Desativa o bypass"""
+    bypass_state["mode"] = "off"
+    save_bypass_state()
+    print("🔒 BYPASS DESATIVADO - Redirecionando para servidor original")
+
+def enable_bypass():
+    """Ativa o bypass"""
+    bypass_state["mode"] = "proxy"
+    bypass_state["start_time"] = datetime.now().isoformat()
+    save_bypass_state()
+    print("🔓 BYPASS ATIVADO - Interceptando requisições")
+
+def mark_installed(client_ip):
+    """Marca que o IP já instalou"""
+    if client_ip not in bypass_state["installed_ips"]:
+        bypass_state["installed_ips"].append(client_ip)
+        save_bypass_state()
+
+def is_installed(client_ip):
+    """Verifica se o IP já instalou"""
+    return client_ip in bypass_state["installed_ips"]
+
+# ==================== DEFAULT CONFIG ====================
 DEFAULT_CONFIG = {
     "HS_NECK": False,
     "HS_CHEST": False,
@@ -182,6 +261,9 @@ def load_data():
         key_expiry = {}
         save_data()
 
+load_data()
+load_bypass_state()
+
 # ========================================================
 
 def login_required(f):
@@ -294,7 +376,8 @@ def admin_dashboard():
                                  keys=generated_keys,
                                  ips=registered_ips,
                                  key_expiry=key_expiry,
-                                 all_keys="\n".join(generated_keys.keys()))
+                                 all_keys="\n".join(generated_keys.keys()),
+                                 bypass_mode=bypass_state.get("mode", "proxy"))
 
 @app.route('/admin')
 def admin_index():
@@ -340,6 +423,34 @@ def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
+@app.route('/admin/bypass/toggle', methods=['POST'])
+@login_required
+def toggle_bypass():
+    """Liga/Desliga o bypass manualmente"""
+    data = request.json
+    mode = data.get('mode', 'proxy')
+    
+    if mode == "off":
+        disable_bypass()
+    else:
+        enable_bypass()
+    
+    return jsonify({
+        'success': True,
+        'mode': bypass_state['mode']
+    })
+
+@app.route('/admin/bypass/status', methods=['GET'])
+@login_required
+def bypass_status():
+    """Retorna o status do bypass"""
+    return jsonify({
+        'mode': bypass_state['mode'],
+        'start_time': bypass_state.get('start_time'),
+        'auto_off_minutes': bypass_state.get('auto_off_minutes', 3),
+        'installed_ips': bypass_state.get('installed_ips', [])
+    })
+
 @app.route('/logout')
 def user_logout_alias():
     session.pop('unlocked', None)
@@ -368,6 +479,10 @@ def verify_key():
     key_expiry[client_ip] = expiry_date
     session['unlocked'] = True
     save_data()
+    
+    # Marca que instalou e ativa o bypass
+    mark_installed(client_ip)
+    enable_bypass()
 
     return jsonify({
         'success': True,
@@ -375,12 +490,27 @@ def verify_key():
         'expires': expiry_date.isoformat()
     })
 
-# ============ PROXY ROUTES - NO KEY REQUIRED ============
+# ============ PROXY ROUTES - COM CONTROLE DE BYPASS ============
 
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
     client_ip = get_client_ip()
+    
+    # Verifica se deve desativar o bypass
+    if should_disable_bypass():
+        disable_bypass()
+    
+    # Se bypass está desativado, redireciona para o original
+    if not is_bypass_active():
+        params = dict(request.args)
+        try:
+            response = requests.get(VER_PHP_URL, params=params, timeout=60)
+            return Response(response.text, status=200, content_type="application/json")
+        except Exception as e:
+            return Response(f"Error: {e}", status=502)
+    
+    # Bypass ativo - intercepta e modifica
     params = dict(request.args)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
     try:
@@ -399,7 +529,18 @@ def handle_cdn(path=""):
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
+    # Se bypass está desativado, redireciona tudo para o original
+    if not is_bypass_active():
+        target_url = TARGET_BASE_URL + path
+        try:
+            resp = requests.get(target_url, timeout=60)
+            return Response(resp.content, status=resp.status_code, content_type=resp.headers.get('content-type', 'application/octet-stream'))
+        except Exception as e:
+            return Response(f"Error: {e}", status=502)
+
+    # ===== BYPASS ATIVO =====
+    
+    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/avatar/assetindexer").match(path) and os.path.exists(assetindexer_file):
         with open(assetindexer_file, "rb") as f:
             return Response(f.read(), status=200, content_type="application/octet-stream")
 
@@ -439,7 +580,9 @@ def api_status():
         "ip": client_ip,
         "config": config,
         "key": registered_ips.get(client_ip),
-        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None
+        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None,
+        "bypass_mode": bypass_state.get("mode", "proxy"),
+        "is_installed": is_installed(client_ip)
     })
 
 @app.route('/api/toggle', methods=['POST'])
@@ -479,7 +622,8 @@ def api_ip_check():
         "ip": client_ip,
         "key": registered_ips.get(client_ip),
         "is_authorized": client_ip in registered_ips,
-        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None
+        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None,
+        "bypass_mode": bypass_state.get("mode", "proxy")
     })
 
 @app.route('/')
@@ -498,8 +642,6 @@ def unlock():
     return jsonify({'success': True})
 
 # ==================== HTML TEMPLATES ====================
-
-# ==================== UI KAZE (tema do index.html) ====================
 
 UI_CSS = """
 :root{
@@ -529,7 +671,7 @@ background-image:radial-gradient(circle at 15% 10%,rgba(124,58,237,.09) 0%,trans
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:var(--radius-full)}
 ::-webkit-scrollbar-thumb:hover{background:var(--primary-light)}
 input,button,select,textarea{font-family:inherit;outline:none}
-button{corder:0}
+button{border:0}
 
 .app-container{display:flex;flex:1;min-height:100vh}
 .sidebar{width:250px;background:var(--bg-sidebar);border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;justify-content:space-between;padding:24px 16px;flex-shrink:0;position:sticky;top:0;height:100vh;z-index:100}
@@ -575,6 +717,7 @@ button{corder:0}
 .widget-val{font-size:12.5px;font-weight:700}
 .widget-val.green{color:var(--success);text-shadow:0 0 10px rgba(34,197,94,.4)}
 .widget-val.purple{color:var(--text-purple);font-size:13.5px}
+.widget-val.orange{color:var(--warning);font-size:13.5px}
 
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
 .stat-card{background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;transition:var(--transition);position:relative;overflow:hidden}
@@ -642,7 +785,6 @@ tbody td{padding:11px 12px;border-bottom:1px solid var(--border-subtle);color:#d
 @keyframes spin{to{transform:rotate(360deg)}}
 .closing-msg{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);letter-spacing:.2em;text-transform:uppercase}
 
-/* --- AUTH (login / key gate) --- */
 .auth-shell{width:min(980px,100%);min-height:560px;display:grid;grid-template-columns:1.05fr .95fr;border:1px solid var(--border-subtle);background:rgba(18,22,30,.94);box-shadow:0 32px 90px #0008;border-radius:var(--radius-lg);overflow:hidden;animation:tabFadeIn .4s ease}
 .auth-visual{padding:58px;display:flex;flex-direction:column;justify-content:space-between;border-right:1px solid var(--border-subtle);background:linear-gradient(150deg,#1a121f,#0d0c14 55%)}
 .auth-visual .brand{display:flex;align-items:center;gap:12px;font-weight:900;letter-spacing:3px;font-size:18px}
@@ -665,53 +807,55 @@ tbody td{padding:11px 12px;border-bottom:1px solid var(--border-subtle);color:#d
 @media(max-width:900px){.sidebar{display:none}.main-wrapper{padding:24px 16px}.stats-grid{grid-template-columns:repeat(2,1fr)}.features-grid{grid-template-columns:1fr}.auth-shell{grid-template-columns:1fr}.auth-visual{display:none}}
 """
 
-LOGIN_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS Â· Admin</title>"
+LOGIN_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS · Admin</title>"
     "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
     "<style>" + UI_CSS + "</style></head><body><main style='display:grid;place-items:center;min-height:100vh;padding:24px'>"
-    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><img src='/static/kaze_logo.png' alt='LEAKS BYPASS'></div>"
+    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><span style='font-size:24px;color:var(--primary-light)'>⚡</span> LEAKS BYPASS</div>"
     "<div style='margin-top:64px' class='auth-label'>PRIVATE CONTROL SYSTEM</div>"
     "<h1>Enter the<br><span>operator</span><br>console.</h1>"
-    "<p>Area administrativa para controle de acessos, keys e sessoes ativas.</p></div><div class='auth-serial'>NODE / 07 Â· AUTH REQUIRED</div></section>"
+    "<p>Área administrativa para controle de acessos, keys e sessões ativas.</p></div><div class='auth-serial'>NODE / 07 · AUTH REQUIRED</div></section>"
     "<section class='auth-form'><div class='auth-label'>ADMIN AUTHENTICATION</div><h2>Entrar no painel</h2><p class='sub'>Informe suas credenciais para continuar.</p>"
-    "<form method='POST' autocomplete='on'><div class='field'><label for='username'>Usuario</label><input id='username' name='username' required autocomplete='username' placeholder='seu usuario'></div>"
+    "<form method='POST' autocomplete='on'><div class='field'><label for='username'>Usuário</label><input id='username' name='username' required autocomplete='username' placeholder='seu usuário'></div>"
     "<div class='field'><label for='password'>Senha</label><input id='password' type='password' name='password' required autocomplete='current-password' placeholder='sua senha'></div>"
-    "<button class='btn-auth' type='submit'>Acessar console &#8594;</button>{% if error %}<div class='error'>{{ error }}</div>{% endif %}</form>"
-    "<div class='foot'>&#128737; SESSAO PROTEGIDA Â· LEAKS BYPASS</div></section></section></main></body></html>")
+    "<button class='btn-auth' type='submit'>Acessar console →</button>{% if error %}<div class='error'>{{ error }}</div>{% endif %}</form>"
+    "<div class='foot'>🔒 SESSÃO PROTEGIDA · LEAKS BYPASS</div></section></section></main></body></html>")
 
-KEY_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS Â· Access</title>"
+KEY_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS · Access</title>"
     "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
     "<style>" + UI_CSS + "</style></head><body><main style='display:grid;place-items:center;min-height:100vh;padding:24px'>"
-    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><img src='/static/kaze_logo.png' alt='LEAKS BYPASS'></div>"
+    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><span style='font-size:24px;color:var(--primary-light)'>⚡</span> LEAKS BYPASS</div>"
     "<div style='margin-top:64px' class='auth-label' style='color:#a855f7'>ACCESS GATE / 01</div>"
     "<h1>One key.<br><span>Full access.</span></h1>"
-    "<p>Use a key issued by the administrator to open your control dashboard.</p></div><div class='auth-serial'>SECURE CHANNEL Â· READY</div></section>"
+    "<p>Use a key issued by the administrator to open your control dashboard.</p></div><div class='auth-serial'>SECURE CHANNEL · READY</div></section>"
     "<section class='auth-form'><div class='auth-label'>USER ACCESS</div><h2>Validar acesso</h2><p class='sub'>Cole sua key para continuar.</p>"
     "<form id='keyForm'><div class='field'><label for='accessKey'>Access key</label><input id='accessKey' required spellcheck='false' placeholder='LEAKS BYPASS-0000'></div>"
-    "<button class='btn-auth' type='submit' id='openBtn'>Abrir dashboard &#8599;</button><div id='keyError' role='alert'></div></form>"
-    "<div class='hint-text' style='margin-top:14px'>Keys sao geradas exclusivamente pelo administrador.</div>"
-    "<div class='foot'>&#128274; ENCRYPTED SESSION</div></section></section></main>"
+    "<button class='btn-auth' type='submit' id='openBtn'>Abrir dashboard ↗</button><div id='keyError' role='alert'></div></form>"
+    "<div class='hint-text' style='margin-top:14px'>Keys são geradas exclusivamente pelo administrador.</div>"
+    "<div class='foot'>🔐 ENCRYPTED SESSION</div></section></section></main>"
     "<div class='toast' id='toast'></div>"
-    "<script>document.getElementById('keyForm').addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('openBtn'),m=document.getElementById('keyError');b.disabled=true;m.textContent='VALIDANDO KEY...';m.className='success';try{const r=await fetch('/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:document.getElementById('accessKey').value.trim()})});const d=await r.json();if(!r.ok||!d.success)throw Error(d.message||'KEY INVALIDA');toast('Acesso liberado','');location.href='/dashboard'}catch(err){m.textContent=err.message;m.className='error';b.disabled=false}});function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}</script>"
+    "<script>document.getElementById('keyForm').addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('openBtn'),m=document.getElementById('keyError');b.disabled=true;m.textContent='VALIDANDO KEY...';m.className='success';try{const r=await fetch('/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:document.getElementById('accessKey').value.trim()})});const d=await r.json();if(!r.ok||!d.success)throw Error(d.message||'KEY INVÁLIDA');toast('Acesso liberado','');location.href='/dashboard'}catch(err){m.textContent=err.message;m.className='error';b.disabled=false}});function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}</script>"
     "</body></html>")
 
-ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS Â· Admin</title>"
+ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS · Admin</title>"
     "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
     "<style>" + UI_CSS + "</style></head><body>"
-    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><img src='/static/kaze_logo.png' alt='LEAKS BYPASS'></div></div>"
+    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><span style='font-size:20px;color:var(--primary-light)'>⚡</span> LEAKS BYPASS</div></div>"
     "<nav class='sidebar-nav'><a class='nav-item active' href='/admin/dashboard'><svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/></svg><span>Overview</span></a>"
     "<a class='nav-item' href='#keys'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg><span>Keys</span></a>"
-    "<a class='nav-item' href='#ips'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg><span>Sessions</span></a></nav></div>"
+    "<a class='nav-item' href='#ips'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg><span>Sessions</span></a>"
+    "<a class='nav-item' href='#bypass'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg><span>Bypass</span></a></nav></div>"
     "<div class='sidebar-bottom'><div class='sidebar-user'><div class='user-avatar-wrap'><div style='width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--primary-gradient);font-weight:900;color:#fff'>A</div></div>"
     "<div class='user-info'><div style='display:flex;align-items:center;gap:6px'><span class='user-name'>Admin</span><span class='badge-pro'>PRO</span></div>"
     "<div class='user-status'><span class='status-dot-green'></span><span>Online</span></div></div></div>"
-    "<a class='sidebar-unload-btn' href='/admin/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Encerrar sessao</span></a></div></aside>"
+    "<a class='sidebar-unload-btn' href='/admin/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Encerrar sessão</span></a></div></aside>"
     "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name'>Operations</h1><span class='greeting-sub'>Console administrativo do LEAKS BYPASS.</span></div>"
-    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green'>&#9679; ONLINE</span></div></div>"
-    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Total keys</span><span class='widget-val purple' id='totalKeysWidget'>{{ keys|length }}</span></div></div></div></header>"
+    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green'>● ONLINE</span></div></div>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Bypass</span><span class='widget-val orange' id='bypassStatusWidget'>{{ bypass_mode }}</span></div></div>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Total keys</span><span class='widget-val purple'>{{ keys|length }}</span></div></div></div></header>"
     "<section class='stats-grid'>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Total Keys</span><span class='stat-value'>{{ keys|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>IPs Ativos</span><span class='stat-value'>{{ ips|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/></svg></div></div>"
-    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Validade Padrao</span><span class='stat-value' id='statDays'>7 dias</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Bypass</span><span class='stat-value' id='bypassStatus'>{{ bypass_mode }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>LEAKS BYPASS</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
     "</section>"
     "<div class='features-grid'>"
@@ -719,44 +863,44 @@ ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8
     "<div class='field'><label>Prefixo</label><input id='keyPrefix' value='LEAKS BYPASS'></div>"
     "<div class='field'><label>Limite de IPs</label><input id='ipLimit' type='number' value='1' min='1'></div>"
     "<div class='field'><label>Validade em dias</label><input id='keyDays' type='number' value='7' min='1'></div>"
-    "<button class='btn-action-load btn-positive' onclick='generateKey()'>Gerar key &#8594;</button><div id='generatedKey' class='generated'></div></section>"
-    "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg></div><h2 class='panel-card-title'>Resumo</h2></div>"
-    "<div class='setting-row'><span class='setting-label'>Keys emitidas</span><span class='info-val-badge'>{{ keys|length }}</span></div>"
-    "<div class='setting-row'><span class='setting-label'>IPs registrados</span><span class='info-val-badge'>{{ ips|length }}</span></div>"
-    "<div class='setting-row'><span class='setting-label'>Status do servico</span><span class='widget-val green'>&#9679; Online</span></div></section>"
+    "<button class='btn-action-load btn-positive' onclick='generateKey()'>Gerar key →</button><div id='generatedKey' class='generated'></div></section>"
+    "<section class='panel-card' id='bypass'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div><h2 class='panel-card-title'>Controle do Bypass</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>Status atual</span><span class='info-val-badge' id='bypassStatus2'>{{ bypass_mode }}</span></div>"
+    "<div class='setting-row'><span class='setting-label'>Auto desativar após</span><span class='info-val-badge'>3 minutos</span></div>"
+    "<div style='display:flex;gap:10px;margin-top:10px'>"
+    "<button class='btn-action-load btn-positive' style='flex:1' onclick='toggleBypass(\"proxy\")'>Ativar Bypass</button>"
+    "<button class='btn-action-load btn-danger' style='flex:1' onclick='toggleBypass(\"off\")'>Desativar Bypass</button>"
+    "</div></section>"
     "</div>"
     "<h2 class='panel-card-title' id='keys' style='margin:32px 0 12px'>Keys emitidas</h2>"
     "<div class='panel-card'><div style='display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-subtle)'><span style='color:var(--text-muted);font-size:13px'>{{ keys|length }} key(s) no total</span>"
-    "<button class='btn-action-load btn-positive' style='min-height:34px;padding:8px 16px;width:auto' onclick=\"copyAllKeys()\">&#128203; Copiar todas</button></div>"
-    "<div class='table-wrap'><table><thead><tr><th>KEY</th><th>LIMIT</th><th>USOS</th><th>VALIDADE</th><th>ACAO</th></tr></thead><tbody>"
+    "<button class='btn-action-load btn-positive' style='min-height:34px;padding:8px 16px;width:auto' onclick=\"copyAllKeys()\">📋 Copiar todas</button></div>"
+    "<div class='table-wrap'><table><thead><tr><th>KEY</th><th>LIMIT</th><th>USOS</th><th>VALIDADE</th><th>AÇÃO</th></tr></thead><tbody>"
     "{% for key, data in keys.items() %}<tr><td><span class='badge'>{{ key }}</span></td><td>{{ data.limit }}</td><td>{{ data.used_ips|length }}</td><td>{{ data.days }} dias</td><td style='white-space:nowrap'><button class='btn-action-load' style='min-height:32px;padding:8px 14px;width:auto;margin-right:6px' onclick=\"copyKey('{{ key }}')\">COPIAR</button><button class='btn-action-load btn-danger' style='min-height:32px;padding:8px 14px;width:auto' onclick=\"revokeKey('{{ key }}')\">REVOGAR</button></td></tr>{% else %}<tr><td colspan='5' style='color:var(--text-muted);text-align:center'>Nenhuma key emitida ainda.</td></tr>{% endfor %}"
     "</tbody></table></div></div>"
-    "<h2 class='panel-card-title' id='ips' style='margin:32px 0 12px'>Sessoes ativas</h2>"
+    "<h2 class='panel-card-title' id='ips' style='margin:32px 0 12px'>Sessões ativas</h2>"
     "<div class='panel-card'><div class='table-wrap'><table><thead><tr><th>IP</th><th>KEY</th><th>EXPIRA EM</th></tr></thead><tbody>"
-    "{% for ip, exp in key_expiry.items() %}<tr><td><span class='badge'>{{ ip }}</span></td><td>{{ ips.get(ip, '') }}</td><td>{{ exp.strftime('%d/%m/%Y') if exp else '-' }}</td></tr>{% else %}<tr><td colspan='3' style='color:var(--text-muted);text-align:center'>Nenhuma sessao ativa.</td></tr>{% endfor %}"
+    "{% for ip, exp in key_expiry.items() %}<tr><td><span class='badge'>{{ ip }}</span></td><td>{{ ips.get(ip, '') }}</td><td>{{ exp.strftime('%d/%m/%Y') if exp else '-' }}</td></tr>{% else %}<tr><td colspan='3' style='color:var(--text-muted);text-align:center'>Nenhuma sessão ativa.</td></tr>{% endfor %}"
     "</tbody></table></div></div>"
-    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 Â· Security First</span></footer></main></div>"
+    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Security First</span></footer></main></div>"
     "<div class='toast' id='toast'></div>"
     "<div class='closing-overlay' id='closing'><div class='closing-inner'><div class='spinner'></div><div class='closing-msg'>PROCESSANDO</div></div></div>"
     "<script>"
     "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
     "function closing(on){document.getElementById('closing').classList.toggle('on',on)}"
-    "async function generateKey(){const d=document.getElementById('keyDays').value*1||7;document.getElementById('statDays').textContent=d+' dias';"
-    "closing(true);try{const r=await fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:document.getElementById('keyPrefix').value,limit:document.getElementById('ipLimit').value,days:d})});"
-    "const j=await r.json();if(j.error)throw Error(j.error);const el=document.getElementById('generatedKey');el.textContent=j.key;el.classList.add('show');"
-    "toast('Key gerada: '+j.key);setTimeout(()=>location.reload(),1200)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
-    "async function revokeKey(k){if(!confirm('Revogar a key '+k+'?'))return;closing(true);try{const r=await fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});"
-    "const j=await r.json();if(j.error)throw Error(j.error);toast('Key revogada');setTimeout(()=>location.reload(),800)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function toggleBypass(mode){closing(true);try{const r=await fetch('/admin/bypass/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});const d=await r.json();if(d.success){toast('Bypass '+mode);setTimeout(()=>location.reload(),800)}else{throw Error('Erro')}}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function generateKey(){const d=document.getElementById('keyDays').value*1||7;closing(true);try{const r=await fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:document.getElementById('keyPrefix').value,limit:document.getElementById('ipLimit').value,days:d})});const j=await r.json();if(j.error)throw Error(j.error);const el=document.getElementById('generatedKey');el.textContent=j.key;el.classList.add('show');toast('Key gerada: '+j.key);setTimeout(()=>location.reload(),1200)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function revokeKey(k){if(!confirm('Revogar a key '+k+'?'))return;closing(true);try{const r=await fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});const j=await r.json();if(j.error)throw Error(j.error);toast('Key revogada');setTimeout(()=>location.reload(),800)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
     "function doCopy(txt,msg){const done=()=>toast(msg);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done).catch(()=>{fallbackCopy(txt);done()})}else{fallbackCopy(txt);done()}}"
     "function fallbackCopy(txt){const t=document.createElement('textarea');t.value=txt;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}"
     "function copyKey(k){doCopy(k,'Key copiada: '+k)}"
     "function copyAllKeys(){const all={{ all_keys|tojson }};const list=all.split('\\n').map(s=>s.trim()).filter(Boolean);if(!list.length){toast('Nenhuma key para copiar','danger');return}doCopy(list.join('\\n'),list.length+' key(s) copiada(s)')}"
     "</script></body></html>")
 
-DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS Â· Dashboard</title>"
+DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>LEAKS BYPASS · Dashboard</title>"
     "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
     "<style>" + UI_CSS + "</style></head><body>"
-    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><img src='/static/kaze_logo.png' alt='LEAKS BYPASS'></div></div>"
+    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><span style='font-size:20px;color:var(--primary-light)'>⚡</span> LEAKS BYPASS</div></div>"
     "<nav class='sidebar-nav'><a class='nav-item active' href='/dashboard'><svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/></svg><span>Painel</span></a>"
     "<a class='nav-item' href='#mira'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg><span>Aim</span></a>"
     "<a class='nav-item' href='#modulos'><svg viewBox='0 0 24 24'><path d='M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6'/></svg><span>Modules</span></a></nav></div>"
@@ -765,48 +909,39 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
     "<div class='user-status'><span class='status-dot-green'></span><span>Online</span></div></div></div>"
     "<a class='sidebar-unload-btn' href='/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Unload / Sair</span></a></div></aside>"
     "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name' id='headerGreetingUser'>Leaks User</h1><span class='greeting-sub'>Tenha um bom desempenho.</span></div>"
-    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green' id='driverStatusVal'>&#9679; ONLINE</span></div></div>"
+    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green' id='driverStatusVal'>● ONLINE</span></div></div>"
     "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Expira em</span><span class='widget-val purple' id='authExpiry'>-</span></div><div class='icon-box-purple' style='width:32px;height:32px;border-radius:8px;background:rgba(147,51,234,.15);border:1px solid rgba(168,85,247,.25);display:flex;align-items:center;justify-content:center'><svg viewBox='0 0 24 24' width='16' height='16' stroke='#a855f7' stroke-width='2' fill='none'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div></div></header>"
     "<section class='stats-grid'>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>LEAKS BYPASS</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Plano</span><span class='stat-value' id='statPlan'>Remote Client</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
-    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Versao</span><span class='stat-value'>v2.0</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><polygon points='12 2 2 7 12 12 22 7 12 2'/><polyline points='2 17 12 22 22 17'/><polyline points='2 12 12 17 22 12'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Versão</span><span class='stat-value'>v2.0</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><polygon points='12 2 2 7 12 12 22 7 12 2'/><polyline points='2 17 12 22 22 17'/><polyline points='2 12 12 17 22 12'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Seu IP</span><span class='stat-value' id='statIp'>-</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg></div></div>"
     "</section>"
     "<div class='features-grid' id='modulos'>"
-    "<section class='panel-card' id='mira'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg></div><h2 class='panel-card-title'>Mira Â· Precisao</h2></div>"
-    "<div class='setting-row'><span class='setting-label'>HS alto</span><div class='toggle-switch' id='sw_hs_neck' onclick=\"opt('hs_neck',this)\"></div></div>"
+    "<section class='panel-card' id='mira'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg></div><h2 class='panel-card-title'>Mira · Precisão</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>HS Pescoço</span><div class='toggle-switch' id='sw_hs_neck' onclick=\"opt('hs_neck',this)\"></div></div>"
     "<div class='setting-row'><span class='setting-label'>HS Peito</span><div class='toggle-switch' id='sw_hs_chest' onclick=\"opt('hs_chest',this)\"></div></div>"
     "<div class='setting-row'><span class='setting-label'>Sensibilidade alta</span><div class='toggle-switch' id='sw_high_sensi' onclick=\"opt('high_sensi',this)\"></div></div></section>"
     "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/></svg></div><h2 class='panel-card-title'>Movimento</h2></div>"
     "<div class='setting-row'><span class='setting-label'>Back Jump V1</span><div class='toggle-switch' id='sw_backjump_v1' onclick=\"opt('backjump_v1',this)\"></div></div>"
-    "<div class='setting-row'><span class='setting-label'>Zig Zag Move</span><div class='toggle-switch' id='sw_zig_zag_move' onclick=\"opt('zig_zag_move',this)\"></div></div></section>"
+    "<div class='setting-row'><span class='setting-label'>Zig Zag Move</span><div class='toggle-switch' id='sw_zig_zag_move' onclick=\"opt('zig_zag_move',this)\"></div></div>"
+    "<div class='setting-row'><span class='setting-label'>Bypass Status</span><span class='info-val-badge' id='bypassStatusUser'>-</span></div></section>"
     "</div>"
-    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 Â· Security First</span></footer></main></div>"
+    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Security First</span></footer></main></div>"
     "<div class='toast' id='toast'></div>"
     "<script>"
     "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
-    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';"
+    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';document.getElementById('bypassStatusUser').textContent=d.bypass_mode||'proxy';"
     "const map={HS_NECK:'sw_hs_neck',HS_CHEST:'sw_hs_chest',BACKJUMPV1:'sw_backjump_v1',HIGH_SENSI:'sw_high_sensi',ZIG_ZAG_MOVE:'sw_zig_zag_move'};"
     "for(const k in map){const el=document.getElementById(map[k]);if(el)el.classList.toggle('on',!!d.config[k])}}catch(e){}}"
-    "async function opt(feature,el){const next=!el.classList.contains('on');el.classList.toggle('on',next);try{const r=await fetch('/api/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feature:feature,value:next})});const d=await r.json();if(d.error)throw Error(d.error);toast('Modulo '+(next?'ativado':'desativado'))}catch(e){el.classList.toggle('on',!next);toast(e.message,'danger')}}"
+    "async function opt(feature,el){const next=!el.classList.contains('on');el.classList.toggle('on',next);try{const r=await fetch('/api/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feature:feature,value:next})});const d=await r.json();if(d.error)throw Error(d.error);toast('Módulo '+(next?'ativado':'desativado'))}catch(e){el.classList.toggle('on',!next);toast(e.message,'danger')}}"
     "load()"
     "</script></body></html>")
 
 # ==================== MAIN ====================
-def get_public_ip():
-    try:
-        response = requests.get('https://api.ipify.org', timeout=5)
-        return response.text.strip()
-    except:
-        try:
-            response = requests.get('https://icanhazip.com', timeout=5)
-            return response.text.strip()
-        except:
-            return "Não foi possível obter o IP público"
-
 if __name__ == "__main__":
     load_data()
+    load_bypass_state()
     port = int(os.environ.get('PORT', 10000))
 
     print("\n" + "="*50)
@@ -815,7 +950,7 @@ if __name__ == "__main__":
     print(f"  Porta do servidor: {port}")
     print(f"  URL pública: https://leomdzproxy-production.up.railway.app")
     print(f"  Admin     : /Po7eO")
-    print(f"  Status    : Rodando")
+    print(f"  Bypass    : {bypass_state.get('mode', 'proxy')}")
     print("="*50 + "\n")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
