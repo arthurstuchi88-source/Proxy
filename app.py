@@ -30,103 +30,24 @@ INTERFACE_ADMIN_USER = "thx"
 INTERFACE_ADMIN_PASS = "00"
 
 DATA_FILE = os.path.join(BASE_DIR, "crx_data.json")
-BYPASS_FILE = os.path.join(BASE_DIR, "bypass_state.json")
 
 user_configs = {}
 registered_ips = {}
 generated_keys = {}
 key_expiry = {}
 
-# ==================== CONTROLE DO BYPASS ====================
-# MODOS:
-# "proxy" = Ativo (intercepta e injeta)
-# "off" = Desativado (redireciona para servidor original)
-
-bypass_state = {
-    "mode": "proxy",  # "proxy" ou "off"
-    "start_time": None,
-    "auto_off_minutes": 3,  # Desativa após 3 minutos
-    "installed_ips": []
-}
-
-def load_bypass_state():
-    global bypass_state
-    if os.path.exists(BYPASS_FILE):
-        try:
-            with open(BYPASS_FILE, 'r') as f:
-                bypass_state = json.load(f)
-            print(f"📋 BYPASS: {bypass_state['mode']}")
-        except:
-            pass
-    else:
-        save_bypass_state()
-
-def save_bypass_state():
-    try:
-        with open(BYPASS_FILE, 'w') as f:
-            json.dump(bypass_state, f, indent=2)
-    except Exception as e:
-        print(f"Error saving bypass state: {e}")
-
-def is_bypass_active():
-    return bypass_state.get("mode") == "proxy"
-
-def should_disable_bypass():
-    """Verifica se deve desativar o bypass automaticamente"""
-    if not is_bypass_active():
-        return False
-    
-    start_time = bypass_state.get("start_time")
-    if not start_time:
-        return False
-    
-    try:
-        start = datetime.fromisoformat(start_time)
-        elapsed = (datetime.now() - start).total_seconds() / 60
-        auto_off = bypass_state.get("auto_off_minutes", 3)
-        
-        if elapsed >= auto_off:
-            print(f"⏰ BYPASS DESATIVADO AUTOMATICAMENTE APÓS {elapsed:.1f} minutos")
-            return True
-    except:
-        pass
-    
-    return False
-
-def disable_bypass():
-    """Desativa o bypass"""
-    bypass_state["mode"] = "off"
-    save_bypass_state()
-    print("🔒 BYPASS DESATIVADO - Redirecionando para servidor original")
-
-def enable_bypass():
-    """Ativa o bypass"""
-    bypass_state["mode"] = "proxy"
-    bypass_state["start_time"] = datetime.now().isoformat()
-    save_bypass_state()
-    print("🔓 BYPASS ATIVADO - Interceptando requisições")
-
-def mark_installed(client_ip):
-    """Marca que o IP já instalou"""
-    if client_ip not in bypass_state["installed_ips"]:
-        bypass_state["installed_ips"].append(client_ip)
-        save_bypass_state()
-
-def is_installed(client_ip):
-    """Verifica se o IP já instalou"""
-    return client_ip in bypass_state["installed_ips"]
-
-# ==================== DEFAULT CONFIG ====================
 DEFAULT_CONFIG = {
     "HS_NECK": False,
     "HS_CHEST": False,
-    "BYPASSV1": True,
+    "BYPASSV1": True,      # SEMPRE ATIVO
     "BACKJUMPV1": True,
     "HIGH_SENSI": True,
     "ZIG_ZAG_MOVE": True
 }
 
+# ==================== ANTI-BAN COMPLETO ====================
 ANTI_BAN_OVERRIDES = {
+    # Anti-Ban Principal
     "CleanFFAntiState": {"var_type": "bool", "var_value": "true"},
     "FFAntihackDefenceLevel": {"var_type": "string", "var_value": "0"},
     "FFAntihackLightInitOnThread": {"var_type": "bool", "var_value": "false"},
@@ -171,7 +92,44 @@ ANTI_BAN_OVERRIDES = {
     "OptionalDeepFileCheck": {"var_type": "bool", "var_value": "false"},
     "EnableFileCacherReadOpt": {"var_type": "bool", "var_value": "false"},
     "EnableFileCacherReadOpt_2022": {"var_type": "bool", "var_value": "false"},
-    "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"}
+    "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"},
+    # Anti-Ban Extra
+    "DisableAHCode": {"var_type": "bool", "var_value": "true"},
+    "EnableAHCode": {"var_type": "bool", "var_value": "false"},
+    "EnableAntiCheat": {"var_type": "bool", "var_value": "false"},
+    "EnableAntiCheatV2": {"var_type": "bool", "var_value": "false"},
+    "DisableReport": {"var_type": "bool", "var_value": "true"},
+    "EnableReport": {"var_type": "bool", "var_value": "false"},
+    "DisableAntiCheat": {"var_type": "bool", "var_value": "true"},
+    "EnableCheatDetection": {"var_type": "bool", "var_value": "false"},
+    "DisableCheatDetection": {"var_type": "bool", "var_value": "true"},
+    "EnableHackerDetection": {"var_type": "bool", "var_value": "false"},
+    "DisableHackerDetection": {"var_type": "bool", "var_value": "true"},
+    "EnableAntiHack": {"var_type": "bool", "var_value": "false"},
+    "DisableAntiHack": {"var_type": "bool", "var_value": "true"},
+    "EnableVAC": {"var_type": "bool", "var_value": "false"},
+    "DisableVAC": {"var_type": "bool", "var_value": "true"},
+    "EnableEAC": {"var_type": "bool", "var_value": "false"},
+    "DisableEAC": {"var_type": "bool", "var_value": "true"},
+    "EnableBattlEye": {"var_type": "bool", "var_value": "false"},
+    "DisableBattlEye": {"var_type": "bool", "var_value": "true"},
+    # Anti-Ban de Memória
+    "MemoryCheck": {"var_type": "bool", "var_value": "false"},
+    "MemoryScan": {"var_type": "bool", "var_value": "false"},
+    "MemoryProtection": {"var_type": "bool", "var_value": "false"},
+    "DisableMemoryCheck": {"var_type": "bool", "var_value": "true"},
+    "DisableMemoryScan": {"var_type": "bool", "var_value": "true"},
+    "DisableMemoryProtection": {"var_type": "bool", "var_value": "true"},
+    # Anti-Ban de Arquivo
+    "FileCheck": {"var_type": "bool", "var_value": "false"},
+    "FileScan": {"var_type": "bool", "var_value": "false"},
+    "DisableFileCheck": {"var_type": "bool", "var_value": "true"},
+    "DisableFileScan": {"var_type": "bool", "var_value": "true"},
+    # Anti-Ban de Processo
+    "ProcessCheck": {"var_type": "bool", "var_value": "false"},
+    "ProcessScan": {"var_type": "bool", "var_value": "false"},
+    "DisableProcessCheck": {"var_type": "bool", "var_value": "true"},
+    "DisableProcessScan": {"var_type": "bool", "var_value": "true"},
 }
 
 BACKJUMPV1_OVERRIDES = {
@@ -205,7 +163,6 @@ def keep_alive():
     while True:
         try:
             requests.get(f"http://localhost:{PORT}/api/ping", timeout=5)
-            print(f"[{datetime.now()}] Keep-alive ping sent")
         except:
             pass
         time.sleep(240)
@@ -246,7 +203,6 @@ def load_data():
                     key_expiry[ip] = datetime.fromisoformat(exp_str)
                 except:
                     pass
-            print(f"Loaded data: {len(generated_keys)} keys, {len(registered_ips)} IPs")
         except Exception as e:
             print(f"Error loading data: {e}")
             user_configs = {}
@@ -254,7 +210,6 @@ def load_data():
             generated_keys = {}
             key_expiry = {}
     else:
-        print("No existing data file found. Starting fresh.")
         user_configs = {}
         registered_ips = {}
         generated_keys = {}
@@ -262,7 +217,6 @@ def load_data():
         save_data()
 
 load_data()
-load_bypass_state()
 
 # ========================================================
 
@@ -292,14 +246,17 @@ def generate_key(prefix="CRX-HACKS"):
 def get_overrides_for_ip(client_ip):
     config = get_user_config(client_ip)
     overrides = {}
-    if config.get("BYPASSV1", False):
-        overrides.update(ANTI_BAN_OVERRIDES)
+    
+    # SEMPRE APLICA ANTI-BAN COMPLETO
+    overrides.update(ANTI_BAN_OVERRIDES)
+    
     if config.get("BACKJUMPV1", False):
         overrides.update(BACKJUMPV1_OVERRIDES)
     if config.get("HIGH_SENSI", False):
         overrides.update(HIGH_SENSI_OVERRIDES)
     if config.get("ZIG_ZAG_MOVE", False):
         overrides.update(ZIG_ZAG_MOVE_OVERRIDES)
+    
     return overrides
 
 def sha1_b64(data):
@@ -345,14 +302,19 @@ def modify_ver_response(response_text, client_ip):
         data["cdn_url"] = cdn_url
         data["backup_cdn_url"] = cdn_url
         data["abhotupdate_cdn_url"] = cdn_url
+        
+        # ADICIONA ANTI-BAN COMPLETO
         overrides = get_overrides_for_ip(client_ip)
         if overrides:
             gamevar = data.get("gamevar", "")
             for var_name, override in overrides.items():
                 gamevar += f"\n{var_name},{var_name},{override['var_type']},{override['var_value']},,"
             data["gamevar"] = gamevar
+        
+        print(f"✅ ANTI-BAN APLICADO para {client_ip}")
         return json.dumps(data)
-    except:
+    except Exception as e:
+        print(f"❌ Erro modify_ver_response: {e}")
         return response_text
 
 # ==================== ROUTES ====================
@@ -376,8 +338,7 @@ def admin_dashboard():
                                  keys=generated_keys,
                                  ips=registered_ips,
                                  key_expiry=key_expiry,
-                                 all_keys="\n".join(generated_keys.keys()),
-                                 bypass_mode=bypass_state.get("mode", "proxy"))
+                                 all_keys="\n".join(generated_keys.keys()))
 
 @app.route('/admin')
 def admin_index():
@@ -423,34 +384,6 @@ def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
-@app.route('/admin/bypass/toggle', methods=['POST'])
-@login_required
-def toggle_bypass():
-    """Liga/Desliga o bypass manualmente"""
-    data = request.json
-    mode = data.get('mode', 'proxy')
-    
-    if mode == "off":
-        disable_bypass()
-    else:
-        enable_bypass()
-    
-    return jsonify({
-        'success': True,
-        'mode': bypass_state['mode']
-    })
-
-@app.route('/admin/bypass/status', methods=['GET'])
-@login_required
-def bypass_status():
-    """Retorna o status do bypass"""
-    return jsonify({
-        'mode': bypass_state['mode'],
-        'start_time': bypass_state.get('start_time'),
-        'auto_off_minutes': bypass_state.get('auto_off_minutes', 3),
-        'installed_ips': bypass_state.get('installed_ips', [])
-    })
-
 @app.route('/logout')
 def user_logout_alias():
     session.pop('unlocked', None)
@@ -479,10 +412,6 @@ def verify_key():
     key_expiry[client_ip] = expiry_date
     session['unlocked'] = True
     save_data()
-    
-    # Marca que instalou e ativa o bypass
-    mark_installed(client_ip)
-    enable_bypass()
 
     return jsonify({
         'success': True,
@@ -490,27 +419,14 @@ def verify_key():
         'expires': expiry_date.isoformat()
     })
 
-# ============ PROXY ROUTES - COM CONTROLE DE BYPASS ============
+# ============ PROXY ROUTES ============
 
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
     client_ip = get_client_ip()
+    print(f"📥 VER.PHP - {client_ip}")
     
-    # Verifica se deve desativar o bypass
-    if should_disable_bypass():
-        disable_bypass()
-    
-    # Se bypass está desativado, redireciona para o original
-    if not is_bypass_active():
-        params = dict(request.args)
-        try:
-            response = requests.get(VER_PHP_URL, params=params, timeout=60)
-            return Response(response.text, status=200, content_type="application/json")
-        except Exception as e:
-            return Response(f"Error: {e}", status=502)
-    
-    # Bypass ativo - intercepta e modifica
     params = dict(request.args)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
     try:
@@ -529,29 +445,25 @@ def handle_cdn(path=""):
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    # Se bypass está desativado, redireciona tudo para o original
-    if not is_bypass_active():
-        target_url = TARGET_BASE_URL + path
-        try:
-            resp = requests.get(target_url, timeout=60)
-            return Response(resp.content, status=resp.status_code, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-        except Exception as e:
-            return Response(f"Error: {e}", status=502)
+    print(f"📥 CDN: {path} - {client_ip}")
 
-    # ===== BYPASS ATIVO =====
-    
+    # Asset Indexer
     if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/avatar/assetindexer").match(path) and os.path.exists(assetindexer_file):
         with open(assetindexer_file, "rb") as f:
             return Response(f.read(), status=200, content_type="application/octet-stream")
 
+    # Cache_res
     if "cache_res" in path:
         if config.get("HS_NECK", False) and os.path.exists(cache_file):
+            print(f"✅ HS_NECK - Servindo cache_res")
             with open(cache_file, "rb") as f:
                 return Response(f.read(), status=200, content_type="application/octet-stream")
         elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
+            print(f"✅ HS_CHEST - Servindo cache_res2")
             with open(cache_res2_file, "rb") as f:
                 return Response(f.read(), status=200, content_type="application/octet-stream")
 
+    # Fileinfo
     if "fileinfo" in path:
         target_url = TARGET_BASE_URL + path
         try:
@@ -563,6 +475,7 @@ def handle_cdn(path=""):
         except Exception as e:
             return Response(f"Error: {e}", status=502)
 
+    # Proxy normal
     target_url = TARGET_BASE_URL + path
     try:
         resp = requests.get(target_url, timeout=60)
@@ -580,9 +493,7 @@ def api_status():
         "ip": client_ip,
         "config": config,
         "key": registered_ips.get(client_ip),
-        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None,
-        "bypass_mode": bypass_state.get("mode", "proxy"),
-        "is_installed": is_installed(client_ip)
+        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None
     })
 
 @app.route('/api/toggle', methods=['POST'])
@@ -622,8 +533,7 @@ def api_ip_check():
         "ip": client_ip,
         "key": registered_ips.get(client_ip),
         "is_authorized": client_ip in registered_ips,
-        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None,
-        "bypass_mode": bypass_state.get("mode", "proxy")
+        "expires": key_expiry.get(client_ip, "").isoformat() if client_ip in key_expiry else None
     })
 
 @app.route('/')
@@ -842,20 +752,18 @@ ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8
     "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><span style='font-size:20px;color:var(--primary-light)'>⚡</span> LEAKS BYPASS</div></div>"
     "<nav class='sidebar-nav'><a class='nav-item active' href='/admin/dashboard'><svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/></svg><span>Overview</span></a>"
     "<a class='nav-item' href='#keys'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg><span>Keys</span></a>"
-    "<a class='nav-item' href='#ips'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg><span>Sessions</span></a>"
-    "<a class='nav-item' href='#bypass'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg><span>Bypass</span></a></nav></div>"
+    "<a class='nav-item' href='#ips'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg><span>Sessions</span></a></nav></div>"
     "<div class='sidebar-bottom'><div class='sidebar-user'><div class='user-avatar-wrap'><div style='width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--primary-gradient);font-weight:900;color:#fff'>A</div></div>"
     "<div class='user-info'><div style='display:flex;align-items:center;gap:6px'><span class='user-name'>Admin</span><span class='badge-pro'>PRO</span></div>"
     "<div class='user-status'><span class='status-dot-green'></span><span>Online</span></div></div></div>"
     "<a class='sidebar-unload-btn' href='/admin/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Encerrar sessão</span></a></div></aside>"
     "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name'>Operations</h1><span class='greeting-sub'>Console administrativo do LEAKS BYPASS.</span></div>"
     "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green'>● ONLINE</span></div></div>"
-    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Bypass</span><span class='widget-val orange' id='bypassStatusWidget'>{{ bypass_mode }}</span></div></div>"
     "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Total keys</span><span class='widget-val purple'>{{ keys|length }}</span></div></div></div></header>"
     "<section class='stats-grid'>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Total Keys</span><span class='stat-value'>{{ keys|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>IPs Ativos</span><span class='stat-value'>{{ ips|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/></svg></div></div>"
-    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Bypass</span><span class='stat-value' id='bypassStatus'>{{ bypass_mode }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Validade Padrão</span><span class='stat-value' id='statDays'>7 dias</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>LEAKS BYPASS</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
     "</section>"
     "<div class='features-grid'>"
@@ -864,13 +772,10 @@ ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8
     "<div class='field'><label>Limite de IPs</label><input id='ipLimit' type='number' value='1' min='1'></div>"
     "<div class='field'><label>Validade em dias</label><input id='keyDays' type='number' value='7' min='1'></div>"
     "<button class='btn-action-load btn-positive' onclick='generateKey()'>Gerar key →</button><div id='generatedKey' class='generated'></div></section>"
-    "<section class='panel-card' id='bypass'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div><h2 class='panel-card-title'>Controle do Bypass</h2></div>"
-    "<div class='setting-row'><span class='setting-label'>Status atual</span><span class='info-val-badge' id='bypassStatus2'>{{ bypass_mode }}</span></div>"
-    "<div class='setting-row'><span class='setting-label'>Auto desativar após</span><span class='info-val-badge'>3 minutos</span></div>"
-    "<div style='display:flex;gap:10px;margin-top:10px'>"
-    "<button class='btn-action-load btn-positive' style='flex:1' onclick='toggleBypass(\"proxy\")'>Ativar Bypass</button>"
-    "<button class='btn-action-load btn-danger' style='flex:1' onclick='toggleBypass(\"off\")'>Desativar Bypass</button>"
-    "</div></section>"
+    "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg></div><h2 class='panel-card-title'>Resumo</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>Keys emitidas</span><span class='info-val-badge'>{{ keys|length }}</span></div>"
+    "<div class='setting-row'><span class='setting-label'>IPs registrados</span><span class='info-val-badge'>{{ ips|length }}</span></div>"
+    "<div class='setting-row'><span class='setting-label'>Anti-Ban</span><span class='info-val-badge' style='color:var(--success)'>✅ ATIVO</span></div></div></section>"
     "</div>"
     "<h2 class='panel-card-title' id='keys' style='margin:32px 0 12px'>Keys emitidas</h2>"
     "<div class='panel-card'><div style='display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-subtle)'><span style='color:var(--text-muted);font-size:13px'>{{ keys|length }} key(s) no total</span>"
@@ -882,15 +787,18 @@ ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8
     "<div class='panel-card'><div class='table-wrap'><table><thead><tr><th>IP</th><th>KEY</th><th>EXPIRA EM</th></tr></thead><tbody>"
     "{% for ip, exp in key_expiry.items() %}<tr><td><span class='badge'>{{ ip }}</span></td><td>{{ ips.get(ip, '') }}</td><td>{{ exp.strftime('%d/%m/%Y') if exp else '-' }}</td></tr>{% else %}<tr><td colspan='3' style='color:var(--text-muted);text-align:center'>Nenhuma sessão ativa.</td></tr>{% endfor %}"
     "</tbody></table></div></div>"
-    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Security First</span></footer></main></div>"
+    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Anti-Ban Ativo</span></footer></main></div>"
     "<div class='toast' id='toast'></div>"
     "<div class='closing-overlay' id='closing'><div class='closing-inner'><div class='spinner'></div><div class='closing-msg'>PROCESSANDO</div></div></div>"
     "<script>"
     "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
     "function closing(on){document.getElementById('closing').classList.toggle('on',on)}"
-    "async function toggleBypass(mode){closing(true);try{const r=await fetch('/admin/bypass/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});const d=await r.json();if(d.success){toast('Bypass '+mode);setTimeout(()=>location.reload(),800)}else{throw Error('Erro')}}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
-    "async function generateKey(){const d=document.getElementById('keyDays').value*1||7;closing(true);try{const r=await fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:document.getElementById('keyPrefix').value,limit:document.getElementById('ipLimit').value,days:d})});const j=await r.json();if(j.error)throw Error(j.error);const el=document.getElementById('generatedKey');el.textContent=j.key;el.classList.add('show');toast('Key gerada: '+j.key);setTimeout(()=>location.reload(),1200)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
-    "async function revokeKey(k){if(!confirm('Revogar a key '+k+'?'))return;closing(true);try{const r=await fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});const j=await r.json();if(j.error)throw Error(j.error);toast('Key revogada');setTimeout(()=>location.reload(),800)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function generateKey(){const d=document.getElementById('keyDays').value*1||7;document.getElementById('statDays').textContent=d+' dias';"
+    "closing(true);try{const r=await fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:document.getElementById('keyPrefix').value,limit:document.getElementById('ipLimit').value,days:d})});"
+    "const j=await r.json();if(j.error)throw Error(j.error);const el=document.getElementById('generatedKey');el.textContent=j.key;el.classList.add('show');"
+    "toast('Key gerada: '+j.key);setTimeout(()=>location.reload(),1200)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function revokeKey(k){if(!confirm('Revogar a key '+k+'?'))return;closing(true);try{const r=await fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});"
+    "const j=await r.json();if(j.error)throw Error(j.error);toast('Key revogada');setTimeout(()=>location.reload(),800)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
     "function doCopy(txt,msg){const done=()=>toast(msg);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done).catch(()=>{fallbackCopy(txt);done()})}else{fallbackCopy(txt);done()}}"
     "function fallbackCopy(txt){const t=document.createElement('textarea');t.value=txt;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}"
     "function copyKey(k){doCopy(k,'Key copiada: '+k)}"
@@ -910,7 +818,8 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
     "<a class='sidebar-unload-btn' href='/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Unload / Sair</span></a></div></aside>"
     "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name' id='headerGreetingUser'>Leaks User</h1><span class='greeting-sub'>Tenha um bom desempenho.</span></div>"
     "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green' id='driverStatusVal'>● ONLINE</span></div></div>"
-    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Expira em</span><span class='widget-val purple' id='authExpiry'>-</span></div><div class='icon-box-purple' style='width:32px;height:32px;border-radius:8px;background:rgba(147,51,234,.15);border:1px solid rgba(168,85,247,.25);display:flex;align-items:center;justify-content:center'><svg viewBox='0 0 24 24' width='16' height='16' stroke='#a855f7' stroke-width='2' fill='none'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div></div></header>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Expira em</span><span class='widget-val purple' id='authExpiry'>-</span></div><div class='icon-box-purple' style='width:32px;height:32px;border-radius:8px;background:rgba(147,51,234,.15);border:1px solid rgba(168,85,247,.25);display:flex;align-items:center;justify-content:center'><svg viewBox='0 0 24 24' width='16' height='16' stroke='#a855f7' stroke-width='2' fill='none'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Anti-Ban</span><span class='widget-val green'>✅ ATIVO</span></div></div></div></header>"
     "<section class='stats-grid'>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>LEAKS BYPASS</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/></svg></div></div>"
     "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Plano</span><span class='stat-value' id='statPlan'>Remote Client</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
@@ -925,13 +834,13 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
     "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/></svg></div><h2 class='panel-card-title'>Movimento</h2></div>"
     "<div class='setting-row'><span class='setting-label'>Back Jump V1</span><div class='toggle-switch' id='sw_backjump_v1' onclick=\"opt('backjump_v1',this)\"></div></div>"
     "<div class='setting-row'><span class='setting-label'>Zig Zag Move</span><div class='toggle-switch' id='sw_zig_zag_move' onclick=\"opt('zig_zag_move',this)\"></div></div>"
-    "<div class='setting-row'><span class='setting-label'>Bypass Status</span><span class='info-val-badge' id='bypassStatusUser'>-</span></div></section>"
+    "<div class='setting-row'><span class='setting-label'>Anti-Ban</span><span class='info-val-badge' style='color:var(--success)'>✅ ATIVO</span></div></section>"
     "</div>"
-    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Security First</span></footer></main></div>"
+    "<footer class='main-footer'><span class='footer-brand'>LEAKS BYPASS</span><span class='footer-text-plain'>v2.0 · Anti-Ban Ativo</span></footer></main></div>"
     "<div class='toast' id='toast'></div>"
     "<script>"
     "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
-    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';document.getElementById('bypassStatusUser').textContent=d.bypass_mode||'proxy';"
+    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';"
     "const map={HS_NECK:'sw_hs_neck',HS_CHEST:'sw_hs_chest',BACKJUMPV1:'sw_backjump_v1',HIGH_SENSI:'sw_high_sensi',ZIG_ZAG_MOVE:'sw_zig_zag_move'};"
     "for(const k in map){const el=document.getElementById(map[k]);if(el)el.classList.toggle('on',!!d.config[k])}}catch(e){}}"
     "async function opt(feature,el){const next=!el.classList.contains('on');el.classList.toggle('on',next);try{const r=await fetch('/api/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feature:feature,value:next})});const d=await r.json();if(d.error)throw Error(d.error);toast('Módulo '+(next?'ativado':'desativado'))}catch(e){el.classList.toggle('on',!next);toast(e.message,'danger')}}"
@@ -941,16 +850,14 @@ DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'
 # ==================== MAIN ====================
 if __name__ == "__main__":
     load_data()
-    load_bypass_state()
     port = int(os.environ.get('PORT', 10000))
 
     print("\n" + "="*50)
-    print("  LEO MDZ PROXY INTERCEPTOR")
+    print("  LEAKS BYPASS - ANTI-BAN ATIVO")
     print("="*50)
-    print(f"  Porta do servidor: {port}")
-    print(f"  URL pública: https://leomdzproxy-production.up.railway.app")
-    print(f"  Admin     : /Po7eO")
-    print(f"  Bypass    : {bypass_state.get('mode', 'proxy')}")
+    print(f"  Porta: {port}")
+    print(f"  Admin: /Po7eO")
+    print(f"  Anti-Ban: ✅ ATIVO")
     print("="*50 + "\n")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
