@@ -12,7 +12,6 @@ import time
 from flask import Flask, request, Response, jsonify, session, redirect, url_for, render_template_string
 from datetime import datetime, timedelta
 from functools import wraps
-import socket
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
@@ -39,123 +38,187 @@ key_expiry = {}
 DEFAULT_CONFIG = {
     "HS_NECK": False,
     "HS_CHEST": False,
-    "BYPASSV1": True,      # SEMPRE ATIVO
+    "BYPASSV1": True,
     "BACKJUMPV1": True,
     "HIGH_SENSI": True,
     "ZIG_ZAG_MOVE": True
 }
 
-# ==================== ANTI-BAN COMPLETO ====================
-ANTI_BAN_OVERRIDES = {
-    # Anti-Ban Principal
-    "CleanFFAntiState": {"var_type": "bool", "var_value": "true"},
-    "FFAntihackDefenceLevel": {"var_type": "string", "var_value": "0"},
-    "FFAntihackLightInitOnThread": {"var_type": "bool", "var_value": "false"},
-    "FFAntihackEmulatorCheckDisbaledClientVariant": {"var_type": "string", "var_value": ""},
-    "FFAntihackSDKDetailEncryptBySHA1": {"var_type": "bool", "var_value": "false"},
-    "EnableFFAntihackInfoExtra": {"var_type": "bool", "var_value": "false"},
-    "CheckHacker": {"var_type": "bool", "var_value": "false"},
-    "DebugHack": {"var_type": "bool", "var_value": "false"},
-    "TestModeEnabled": {"var_type": "bool", "var_value": "true"},
-    "EarlyInitGGP": {"var_type": "bool", "var_value": "false"},
-    "DisableGinInfoSend": {"var_type": "int", "var_value": "1"},
-    "GinInfoBRAliveThreshold": {"var_type": "int", "var_value": "0"},
-    "AntiHackResetSubgameInterval": {"var_type": "int", "var_value": "0"},
-    "FFANTIHACKEXT_SPLIT_THRESHOLD": {"var_type": "int", "var_value": "0"},
-    "NeedProcessAH": {"var_type": "bool", "var_value": "true"},
-    "EnablePlatformCheck": {"var_type": "bool", "var_value": "false"},
-    "EnableSupCheck": {"var_type": "bool", "var_value": "false"},
-    "EnableMMKPlatformCheck": {"var_type": "bool", "var_value": "false"},
-    "ShowHighFrameRateSetting": {"var_type": "bool", "var_value": "true"},
-    "Real60FrameSwitch": {"var_type": "bool", "var_value": "true"},
-    "IsAlbumScreenShotNeedAntiMod": {"var_type": "bool", "var_value": "false"},
-    "EnableIceWallHacker": {"var_type": "bool", "var_value": "false"},
-    "EnableIceWallHackerKill": {"var_type": "bool", "var_value": "false"},
-    "EnableHipHackerKill": {"var_type": "bool", "var_value": "false"},
-    "EnableSendHackStoreLog": {"var_type": "bool", "var_value": "false"},
-    "SystemAlbumImageAntiModStrategy": {"var_type": "int", "var_value": "0"},
-    "AlbumImageAntiModSecs": {"var_type": "int", "var_value": "0"},
-    "AlbumImageAntiMod_iOS": {"var_type": "bool", "var_value": "false"},
-    "ReportInstantiateJank": {"var_type": "bool", "var_value": "false"},
-    "InstantiateJankTimeLimit": {"var_type": "int", "var_value": "0"},
-    "DisableKillRefreshGetTime": {"var_type": "int", "var_value": "0"},
-    "BugReportIntervalOnLowMemory": {"var_type": "int", "var_value": "0"},
-    "EnableIngameQuickReport": {"var_type": "bool", "var_value": "false"},
-    "EnableBugReportTime": {"var_type": "bool", "var_value": "false"},
-    "EnableBugReportEarly": {"var_type": "int", "var_value": "0"},
-    "BugReportMaxCountPerSession": {"var_type": "int", "var_value": "0"},
-    "KickUserInMatchGame": {"var_type": "bool", "var_value": "false"},
-    "Reportee_Damager_RecentlyMaxCnt": {"var_type": "int", "var_value": "0"},
-    "Reportee_Killer_RecentlyMaxCnt": {"var_type": "int", "var_value": "0"},
-    "BlocklistMaxNum": {"var_type": "int", "var_value": "0"},
-    "EnableCheckFileStates": {"var_type": "bool", "var_value": "false"},
-    "OptionalDeepFileCheck": {"var_type": "bool", "var_value": "false"},
-    "EnableFileCacherReadOpt": {"var_type": "bool", "var_value": "false"},
-    "EnableFileCacherReadOpt_2022": {"var_type": "bool", "var_value": "false"},
-    "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"},
-    # Anti-Ban Extra
-    "DisableAHCode": {"var_type": "bool", "var_value": "true"},
-    "EnableAHCode": {"var_type": "bool", "var_value": "false"},
-    "EnableAntiCheat": {"var_type": "bool", "var_value": "false"},
-    "EnableAntiCheatV2": {"var_type": "bool", "var_value": "false"},
-    "DisableReport": {"var_type": "bool", "var_value": "true"},
-    "EnableReport": {"var_type": "bool", "var_value": "false"},
-    "DisableAntiCheat": {"var_type": "bool", "var_value": "true"},
-    "EnableCheatDetection": {"var_type": "bool", "var_value": "false"},
-    "DisableCheatDetection": {"var_type": "bool", "var_value": "true"},
-    "EnableHackerDetection": {"var_type": "bool", "var_value": "false"},
-    "DisableHackerDetection": {"var_type": "bool", "var_value": "true"},
-    "EnableAntiHack": {"var_type": "bool", "var_value": "false"},
-    "DisableAntiHack": {"var_type": "bool", "var_value": "true"},
-    "EnableVAC": {"var_type": "bool", "var_value": "false"},
-    "DisableVAC": {"var_type": "bool", "var_value": "true"},
-    "EnableEAC": {"var_type": "bool", "var_value": "false"},
-    "DisableEAC": {"var_type": "bool", "var_value": "true"},
-    "EnableBattlEye": {"var_type": "bool", "var_value": "false"},
-    "DisableBattlEye": {"var_type": "bool", "var_value": "true"},
-    # Anti-Ban de Memória
-    "MemoryCheck": {"var_type": "bool", "var_value": "false"},
-    "MemoryScan": {"var_type": "bool", "var_value": "false"},
-    "MemoryProtection": {"var_type": "bool", "var_value": "false"},
-    "DisableMemoryCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableMemoryScan": {"var_type": "bool", "var_value": "true"},
-    "DisableMemoryProtection": {"var_type": "bool", "var_value": "true"},
-    # Anti-Ban de Arquivo
-    "FileCheck": {"var_type": "bool", "var_value": "false"},
-    "FileScan": {"var_type": "bool", "var_value": "false"},
-    "DisableFileCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableFileScan": {"var_type": "bool", "var_value": "true"},
-    # Anti-Ban de Processo
-    "ProcessCheck": {"var_type": "bool", "var_value": "false"},
-    "ProcessScan": {"var_type": "bool", "var_value": "false"},
-    "DisableProcessCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableProcessScan": {"var_type": "bool", "var_value": "true"},
-}
+# ==================== VER.PHP PERSONALIZADO ====================
+# Este é o JSON que será enviado para o jogo
+# Modificado para ACEITAR o hack sem banir
 
-BACKJUMPV1_OVERRIDES = {
-    "EnableAccelerationOnFalling": {"var_type": "bool", "var_value": "false"},
-    "CanJumpFallingRunFast": {"var_type": "bool", "var_value": "false"},
-    "CanCreepRunFast": {"var_type": "bool", "var_value": "false"},
-    "CanCrouchingRunFast": {"var_type": "bool", "var_value": "false"},
-    "StropFallingResetSpeed": {"var_type": "bool", "var_value": "true"}
-}
-
-HIGH_SENSI_OVERRIDES = {
-    "SensitivityMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "Sensitivity1PMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X1ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X2ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X4ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X8ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "FreeLookMaxSetting": {"var_type": "float", "var_value": "9.0"}
-}
-
-ZIG_ZAG_MOVE_OVERRIDES = {
-    "FreeMoveAngularSpeed": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedStand": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedCrouch": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedCreep": {"var_type": "float", "var_value": "9999.0"},
-    "ResetRotationSpeed": {"var_type": "float", "var_value": "9999.0"},
+CUSTOM_VER_RESPONSE = {
+    "code": 2,
+    "use_login_optional_download": False,
+    "use_background_download": False,
+    "use_background_download_lobby": False,
+    "country_code": "BR",
+    "gdpr_version": 0,
+    "billboard_cdn_url": "",
+    "billboard_msg": "",
+    "web_url": "",
+    "billboard_bg_url": "",
+    "max_store": "",
+    "max_web": "",
+    "max_video": "",
+    "patchnote_url": "",
+    "multi_region": "",
+    "appstore_url": "http://www.freefiremobile.com/",
+    "backup_appstore_url": "",
+    "garena_login": False,
+    "garena_hint": False,
+    "gop_url": "",
+    # ============ GAMEVAR PERSONALIZADO ============
+    "gamevar": """var_name,comment,var_type,var_value
+ANODisabledRegions,关闭MTP的地区,string,"IND,NA"
+ANODisabledClientVariant,ANODisabledClientVariant,string,"ClientUsingVersion_MAX_HPE,ClientUsingVersion_FFI,ClientUsingVersion_MAX|IND,ClientUsingVersion_MAX|NA,ClientUsingVersion_NORMAL|NA"
+EnableMtpLiteDataRegion,mtp轻特征开关,string,"BR,EUROPE,ID,ME,US,RU,SAC,SG,TH,TW,VN,PK,ZA,BD"
+ANOEmulatorCheckDisbaledClientVariant,ANOEmulatorCheckDisbaledClientVariant,string,"ClientUsingVersion_FFI,ClientUsingVersion_MAX,ClientUsingVersion_NORMAL"
+ForceTutorial_ChangeHudABTest,fps流程中打开hud选择界面的概率,float,-1
+CleanFFAntiState,CleanFFAntiState,bool,true
+FFAntihackDefenceLevel,FFAntihackDefenceLevel,string,0
+FFAntihackLightInitOnThread,FFAntihackLightInitOnThread,bool,false
+FFAntihackEmulatorCheckDisbaledClientVariant,FFAntihackEmulatorCheckDisbaledClientVariant,string,
+FFAntihackSDKDetailEncryptBySHA1,FFAntihackSDKDetailEncryptBySHA1,bool,false
+EnableFFAntihackInfoExtra,EnableFFAntihackInfoExtra,bool,false
+CheckHacker,CheckHacker,bool,false
+DebugHack,DebugHack,bool,false
+TestModeEnabled,TestModeEnabled,bool,true
+EarlyInitGGP,EarlyInitGGP,bool,false
+DisableGinInfoSend,DisableGinInfoSend,int,1
+GinInfoBRAliveThreshold,GinInfoBRAliveThreshold,int,0
+AntiHackResetSubgameInterval,AntiHackResetSubgameInterval,int,0
+FFANTIHACKEXT_SPLIT_THRESHOLD,FFANTIHACKEXT_SPLIT_THRESHOLD,int,0
+NeedProcessAH,NeedProcessAH,bool,true
+EnablePlatformCheck,EnablePlatformCheck,bool,false
+EnableSupCheck,EnableSupCheck,bool,false
+EnableMMKPlatformCheck,EnableMMKPlatformCheck,bool,false
+ShowHighFrameRateSetting,ShowHighFrameRateSetting,bool,true
+Real60FrameSwitch,Real60FrameSwitch,bool,true
+IsAlbumScreenShotNeedAntiMod,IsAlbumScreenShotNeedAntiMod,bool,false
+EnableIceWallHacker,EnableIceWallHacker,bool,false
+EnableIceWallHackerKill,EnableIceWallHackerKill,bool,false
+EnableHipHackerKill,EnableHipHackerKill,bool,false
+EnableSendHackStoreLog,EnableSendHackStoreLog,bool,false
+SystemAlbumImageAntiModStrategy,SystemAlbumImageAntiModStrategy,int,0
+AlbumImageAntiModSecs,AlbumImageAntiModSecs,int,0
+AlbumImageAntiMod_iOS,AlbumImageAntiMod_iOS,bool,false
+ReportInstantiateJank,ReportInstantiateJank,bool,false
+InstantiateJankTimeLimit,InstantiateJankTimeLimit,int,0
+DisableKillRefreshGetTime,DisableKillRefreshGetTime,int,0
+BugReportIntervalOnLowMemory,BugReportIntervalOnLowMemory,int,0
+EnableIngameQuickReport,EnableIngameQuickReport,bool,false
+EnableBugReportTime,EnableBugReportTime,bool,false
+EnableBugReportEarly,EnableBugReportEarly,int,0
+BugReportMaxCountPerSession,BugReportMaxCountPerSession,int,0
+KickUserInMatchGame,KickUserInMatchGame,bool,false
+Reportee_Damager_RecentlyMaxCnt,Reportee_Damager_RecentlyMaxCnt,int,0
+Reportee_Killer_RecentlyMaxCnt,Reportee_Killer_RecentlyMaxCnt,int,0
+BlocklistMaxNum,BlocklistMaxNum,int,0
+EnableCheckFileStates,EnableCheckFileStates,bool,false
+OptionalDeepFileCheck,OptionalDeepFileCheck,bool,false
+EnableFileCacherReadOpt,EnableFileCacherReadOpt,bool,false
+EnableFileCacherReadOpt_2022,EnableFileCacherReadOpt_2022,bool,false
+EnableGGPDecryptFailureProtection,EnableGGPDecryptFailureProtection,bool,false
+DisableAHCode,DisableAHCode,bool,true
+EnableAHCode,EnableAHCode,bool,false
+EnableAntiCheat,EnableAntiCheat,bool,false
+EnableAntiCheatV2,EnableAntiCheatV2,bool,false
+DisableReport,DisableReport,bool,true
+EnableReport,EnableReport,bool,false
+DisableAntiCheat,DisableAntiCheat,bool,true
+EnableCheatDetection,EnableCheatDetection,bool,false
+DisableCheatDetection,DisableCheatDetection,bool,true
+EnableHackerDetection,EnableHackerDetection,bool,false
+DisableHackerDetection,DisableHackerDetection,bool,true
+EnableAntiHack,EnableAntiHack,bool,false
+DisableAntiHack,DisableAntiHack,bool,true
+EnableVAC,EnableVAC,bool,false
+DisableVAC,DisableVAC,bool,true
+EnableEAC,EnableEAC,bool,false
+DisableEAC,DisableEAC,bool,true
+EnableBattlEye,EnableBattlEye,bool,false
+DisableBattlEye,DisableBattlEye,bool,true
+MemoryCheck,MemoryCheck,bool,false
+MemoryScan,MemoryScan,bool,false
+MemoryProtection,MemoryProtection,bool,false
+DisableMemoryCheck,DisableMemoryCheck,bool,true
+DisableMemoryScan,DisableMemoryScan,bool,true
+DisableMemoryProtection,DisableMemoryProtection,bool,true
+FileCheck,FileCheck,bool,false
+FileScan,FileScan,bool,false
+DisableFileCheck,DisableFileCheck,bool,true
+DisableFileScan,DisableFileScan,bool,true
+ProcessCheck,ProcessCheck,bool,false
+ProcessScan,ProcessScan,bool,false
+DisableProcessCheck,DisableProcessCheck,bool,true
+DisableProcessScan,DisableProcessScan,bool,true
+EnableABTest,EnableABTest,bool,true
+DisableABTest,DisableABTest,bool,false
+EnableDebugMode,EnableDebugMode,bool,false
+DisableDebugMode,DisableDebugMode,bool,true
+EnableLogger,EnableLogger,bool,false
+DisableLogger,DisableLogger,bool,true
+EnableCrashReport,EnableCrashReport,bool,false
+DisableCrashReport,DisableCrashReport,bool,true
+EnableAnalytics,EnableAnalytics,bool,false
+DisableAnalytics,DisableAnalytics,bool,true
+EnableTelemetry,EnableTelemetry,bool,false
+DisableTelemetry,DisableTelemetry,bool,true
+EnableMetrics,EnableMetrics,bool,false
+DisableMetrics,DisableMetrics,bool,true
+EnablePerformanceMonitor,EnablePerformanceMonitor,bool,false
+DisablePerformanceMonitor,DisablePerformanceMonitor,bool,true
+EnableNetworkMonitor,EnableNetworkMonitor,bool,false
+DisableNetworkMonitor,DisableNetworkMonitor,bool,true
+EnableResourceMonitor,EnableResourceMonitor,bool,false
+DisableResourceMonitor,DisableResourceMonitor,bool,true
+EnableSecurityMonitor,EnableSecurityMonitor,bool,false
+DisableSecurityMonitor,DisableSecurityMonitor,bool,true
+EnableIntegrityCheck,EnableIntegrityCheck,bool,false
+DisableIntegrityCheck,DisableIntegrityCheck,bool,true
+EnableHashCheck,EnableHashCheck,bool,false
+DisableHashCheck,DisableHashCheck,bool,true
+EnableSignatureCheck,EnableSignatureCheck,bool,false
+DisableSignatureCheck,DisableSignatureCheck,bool,true
+EnableCertificateCheck,EnableCertificateCheck,bool,false
+DisableCertificateCheck,DisableCertificateCheck,bool,true
+EnableRootCheck,EnableRootCheck,bool,false
+DisableRootCheck,DisableRootCheck,bool,true
+EnableEmulatorCheck,EnableEmulatorCheck,bool,false
+DisableEmulatorCheck,DisableEmulatorCheck,bool,true
+EnableVPNCheck,EnableVPNCheck,bool,false
+DisableVPNCheck,DisableVPNCheck,bool,true
+EnableProxyCheck,EnableProxyCheck,bool,false
+DisableProxyCheck,DisableProxyCheck,bool,true
+EnableDebuggerCheck,EnableDebuggerCheck,bool,false
+DisableDebuggerCheck,DisableDebuggerCheck,bool,true
+EnableInjectorCheck,EnableInjectorCheck,bool,false
+DisableInjectorCheck,DisableInjectorCheck,bool,true
+EnableModCheck,EnableModCheck,bool,false
+DisableModCheck,DisableModCheck,bool,true
+EnableCheatEngineCheck,EnableCheatEngineCheck,bool,false
+DisableCheatEngineCheck,DisableCheatEngineCheck,bool,true
+EnableGameGuardianCheck,EnableGameGuardianCheck,bool,false
+DisableGameGuardianCheck,DisableGameGuardianCheck,bool,true
+EnableLuckyPatcherCheck,EnableLuckyPatcherCheck,bool,false
+DisableLuckyPatcherCheck,DisableLuckyPatcherCheck,bool,true
+EnableXposedCheck,EnableXposedCheck,bool,false
+DisableXposedCheck,DisableXposedCheck,bool,true
+EnableMagiskCheck,EnableMagiskCheck,bool,false
+DisableMagiskCheck,DisableMagiskCheck,bool,true
+EnableFridaCheck,EnableFridaCheck,bool,false
+DisableFridaCheck,DisableFridaCheck,bool,true
+EnableSubstrateCheck,EnableSubstrateCheck,bool,false
+DisableSubstrateCheck,DisableSubstrateCheck,bool,true
+EnableCydiaCheck,EnableCydiaCheck,bool,false
+DisableCydiaCheck,DisableCydiaCheck,bool,true""",
+    "device_whitelist_version": "1.6.0",
+    "whitelist_mask": 0,
+    "device_whitelist_sp_version": "1.0.0",
+    "whitelist_sp_mask": 0,
+    "ggp_url": "gin.freefiremobile.com"
 }
 
 # ==================== KEEP ALIVE ====================
@@ -243,22 +306,6 @@ def generate_key(prefix="CRX-HACKS"):
     random_part = ''.join(random.choices(string.digits, k=4))
     return f"{prefix}-{random_part}"
 
-def get_overrides_for_ip(client_ip):
-    config = get_user_config(client_ip)
-    overrides = {}
-    
-    # SEMPRE APLICA ANTI-BAN COMPLETO
-    overrides.update(ANTI_BAN_OVERRIDES)
-    
-    if config.get("BACKJUMPV1", False):
-        overrides.update(BACKJUMPV1_OVERRIDES)
-    if config.get("HIGH_SENSI", False):
-        overrides.update(HIGH_SENSI_OVERRIDES)
-    if config.get("ZIG_ZAG_MOVE", False):
-        overrides.update(ZIG_ZAG_MOVE_OVERRIDES)
-    
-    return overrides
-
 def sha1_b64(data):
     return base64.b64encode(hashlib.sha1(data).digest()).decode()
 
@@ -294,28 +341,6 @@ def patch_fileinfo(original_text, config):
         else:
             new_lines.append(line)
     return "\n".join(new_lines)
-
-def modify_ver_response(response_text, client_ip):
-    try:
-        data = json.loads(response_text)
-        cdn_url = f"https://{request.host}/cdn/live/ABHotUpdates/"
-        data["cdn_url"] = cdn_url
-        data["backup_cdn_url"] = cdn_url
-        data["abhotupdate_cdn_url"] = cdn_url
-        
-        # ADICIONA ANTI-BAN COMPLETO
-        overrides = get_overrides_for_ip(client_ip)
-        if overrides:
-            gamevar = data.get("gamevar", "")
-            for var_name, override in overrides.items():
-                gamevar += f"\n{var_name},{var_name},{override['var_type']},{override['var_value']},,"
-            data["gamevar"] = gamevar
-        
-        print(f"✅ ANTI-BAN APLICADO para {client_ip}")
-        return json.dumps(data)
-    except Exception as e:
-        print(f"❌ Erro modify_ver_response: {e}")
-        return response_text
 
 # ==================== ROUTES ====================
 
@@ -424,17 +449,16 @@ def verify_key():
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
+    """SERVE O VER.PHP PERSONALIZADO"""
     client_ip = get_client_ip()
-    print(f"📥 VER.PHP - {client_ip}")
+    print(f"📥 VER.PHP PERSONALIZADO para {client_ip}")
     
-    params = dict(request.args)
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
-    try:
-        response = requests.get(VER_PHP_URL, params=params, headers=headers, timeout=60)
-        modified = modify_ver_response(response.text, client_ip)
-        return Response(modified, status=200, content_type="application/json")
-    except Exception as e:
-        return Response(f"Error: {e}", status=502)
+    # Retorna o JSON personalizado
+    return Response(
+        json.dumps(CUSTOM_VER_RESPONSE),
+        status=200,
+        content_type="application/json"
+    )
 
 @app.route('/cdn/live/ABHotUpdates/', methods=['GET'])
 @app.route('/cdn/live/ABHotUpdates/<path:path>', methods=['GET'])
@@ -853,11 +877,12 @@ if __name__ == "__main__":
     port = int(os.environ.get('PORT', 10000))
 
     print("\n" + "="*50)
-    print("  LEAKS BYPASS - ANTI-BAN ATIVO")
+    print("  🔥 LEAKS BYPASS - VER.PHP PERSONALIZADO")
     print("="*50)
     print(f"  Porta: {port}")
     print(f"  Admin: /Po7eO")
-    print(f"  Anti-Ban: ✅ ATIVO")
+    print(f"  Anti-Ban: ✅ COMPLETO")
+    print(f"  VER.PHP: ✅ PERSONALIZADO")
     print("="*50 + "\n")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
