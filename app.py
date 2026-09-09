@@ -26,6 +26,9 @@ PORT = int(os.environ.get('PORT', 10000))
 
 ADMIN_USER = "LEOMDZ"
 ADMIN_PASS = "OWNER"
+# Compatibilidade com as credenciais usadas pela interface Kaze recebida.
+INTERFACE_ADMIN_USER = "kazebypass"
+INTERFACE_ADMIN_PASS = "kazebypass"
 
 # Data file paths
 DATA_FILE = os.path.join(BASE_DIR, "crx_data.json")
@@ -277,7 +280,8 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '')
         password = request.form.get('password', '')
-        if username == ADMIN_USER and password == ADMIN_PASS:
+        if ((username == ADMIN_USER and password == ADMIN_PASS) or
+                (username == INTERFACE_ADMIN_USER and password == INTERFACE_ADMIN_PASS)):
             session['logged_in'] = True
             return redirect(url_for('admin_dashboard'))
         return render_template_string(LOGIN_PAGE, error="CREDENCIAIS INVÁLIDAS")
@@ -289,7 +293,12 @@ def admin_dashboard():
     return render_template_string(ADMIN_DASHBOARD,
                                  keys=generated_keys,
                                  ips=registered_ips,
-                                 key_expiry=key_expiry)
+                                 key_expiry=key_expiry,
+                                 all_keys="\n".join(generated_keys.keys()))
+
+@app.route('/admin')
+def admin_index():
+    return redirect(url_for('admin_dashboard') if session.get('logged_in') else url_for('login'))
 
 @app.route('/admin/generate', methods=['POST'])
 @login_required
@@ -331,6 +340,11 @@ def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
+@app.route('/logout')
+def user_logout_alias():
+    session.pop('unlocked', None)
+    return redirect(url_for('landing'))
+
 @app.route('/verify', methods=['POST'])
 def verify_key():
     client_ip = get_client_ip()
@@ -338,6 +352,7 @@ def verify_key():
     key = data.get('key', '').strip()
 
     if client_ip in registered_ips:
+        session['unlocked'] = True
         return jsonify({'success': True, 'message': 'JÁ REGISTRADO'})
 
     if key not in generated_keys:
@@ -351,6 +366,7 @@ def verify_key():
     key_data['used_ips'].append(client_ip)
     expiry_date = datetime.now() + timedelta(days=key_data['days'])
     key_expiry[client_ip] = expiry_date
+    session['unlocked'] = True
     save_data()
 
     return jsonify({
@@ -383,7 +399,7 @@ def handle_cdn(path=""):
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
+    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/avatar/assetindexer").match(path) and os.path.exists(assetindexer_file):
         with open(assetindexer_file, "rb") as f:
             return Response(f.read(), status=200, content_type="application/octet-stream")
 
@@ -468,7 +484,7 @@ def api_ip_check():
 
 @app.route('/')
 def landing():
-    return render_template_string(LANDING_PAGE)
+    return render_template_string(KEY_PAGE)
 
 @app.route('/dashboard')
 def dashboard():
@@ -483,433 +499,299 @@ def unlock():
 
 # ==================== HTML TEMPLATES ====================
 
-LOGIN_PAGE = """<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEO MDZ · ADMINISTRADOR</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#07070d;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:'Poppins','Segoe UI',sans-serif;overflow:hidden}
-        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
-        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.18;animation:float 14s ease-in-out infinite}
-        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
-        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
-        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
-        .container{position:relative;z-index:1;background:rgba(15,15,26,0.88);backdrop-filter:blur(28px);border-radius:28px;padding:48px 44px;width:100%;max-width:410px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.8)}
-        .brand{text-align:center;margin-bottom:36px}
-        .brand .icon{width:60px;height:60px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:18px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;margin-bottom:14px;box-shadow:0 12px 32px rgba(139,92,246,0.35)}
-        .brand h1{color:#fff;font-size:26px;font-weight:300;letter-spacing:6px;text-transform:uppercase}
-        .brand h1 span{color:#a78bfa;font-weight:700}
-        .brand p{color:rgba(255,255,255,0.18);font-size:10px;letter-spacing:3px;margin-top:6px;text-transform:uppercase}
-        .field{margin-bottom:18px}
-        .field label{display:block;color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;font-weight:600}
-        .field input{width:100%;padding:14px 18px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;color:#fff;font-size:15px;transition:0.3s;outline:none;font-family:inherit}
-        .field input:focus{border-color:rgba(139,92,246,0.5);background:rgba(139,92,246,0.05);box-shadow:0 0 0 4px rgba(139,92,246,0.08)}
-        .btn{width:100%;padding:16px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:600;letter-spacing:2px;cursor:pointer;transition:0.3s;font-family:inherit;text-transform:uppercase}
-        .btn:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(139,92,246,0.35)}
-        .error{color:#f87171;font-size:12px;text-align:center;margin-top:14px;padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.15);text-transform:uppercase;letter-spacing:1px;font-weight:600}
-        .footer{text-align:center;margin-top:24px;color:rgba(255,255,255,0.08);font-size:9px;letter-spacing:3px;text-transform:uppercase}
-    </style>
-</head>
-<body>
-    <div class="aurora"><span></span><span></span></div>
-    <div class="container">
-        <div class="brand">
-            <div class="icon"><i class="fas fa-shield-halved"></i></div>
-            <h1>LEO <span>MDZ</span></h1>
-            <p>ACESSO ADMINISTRATIVO</p>
-        </div>
-        <form method="POST">
-            <div class="field"><label>USUÁRIO</label><input type="text" name="username" placeholder="DIGITE O USUÁRIO" required autocomplete="off"></div>
-            <div class="field"><label>SENHA</label><input type="password" name="password" placeholder="DIGITE A SENHA" required></div>
-            <button type="submit" class="btn">AUTENTICAR</button>
-            {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        </form>
-        <div class="footer">SEGURO</div>
-    </div>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-</body>
-</html>"""
+# ==================== UI KAZE (tema do index.html) ====================
 
-ADMIN_DASHBOARD = """<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEO MDZ · ADMINISTRADOR</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;color:#fff;padding:24px;min-height:100vh;position:relative}
-        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
-        .aurora span{position:absolute;border-radius:50%;filter:blur(110px);opacity:.12;animation:float 16s ease-in-out infinite}
-        .aurora span:nth-child(1){width:500px;height:500px;background:#7c3aed;top:-160px;left:-140px}
-        .aurora span:nth-child(2){width:440px;height:440px;background:#ec4899;bottom:-160px;right:-120px;animation-delay:-8s}
-        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(50px,40px) scale(1.15)}}
-        .container{max-width:1200px;margin:0 auto;position:relative;z-index:1}
-        .header{display:flex;justify-content:space-between;align-items:center;padding:20px 0;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:32px}
-        .header h1{font-size:22px;font-weight:300;letter-spacing:4px;text-transform:uppercase}
-        .header h1 span{color:#a78bfa;font-weight:700}
-        .header a{color:rgba(255,255,255,0.4);text-decoration:none;padding:10px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;transition:0.3s;font-size:13px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
-        .header a:hover{background:rgba(255,255,255,0.05);color:#fff}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-        .card{background:rgba(15,15,26,0.85);backdrop-filter:blur(20px);border-radius:18px;padding:24px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 20px 50px rgba(0,0,0,0.4)}
-        .card h2{font-size:13px;font-weight:600;margin-bottom:18px;color:rgba(255,255,255,0.5);letter-spacing:2px;text-transform:uppercase}
-        .card h2 i{color:#a78bfa;margin-right:10px}
-        .field{margin-bottom:14px}
-        .field label{display:block;color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;font-weight:600}
-        .field input{width:100%;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;color:#fff;font-size:14px;outline:none;transition:0.3s;font-family:inherit}
-        .field input:focus{border-color:rgba(139,92,246,0.5)}
-        .btn{padding:12px 24px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border:none;border-radius:10px;color:#fff;font-size:12px;font-weight:600;letter-spacing:1px;cursor:pointer;transition:0.3s;font-family:inherit;text-transform:uppercase}
-        .btn:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(139,92,246,0.3)}
-        .btn-danger{background:linear-gradient(135deg,#ef4444,#dc2626)}
-        .btn-danger:hover{box-shadow:0 8px 28px rgba(239,68,68,0.3)}
-        .btn-sm{padding:6px 14px;font-size:10px}
-        .table-wrap{overflow-x:auto;margin-top:8px}
-        table{width:100%;border-collapse:collapse;font-size:12px}
-        th{text-align:left;padding:10px 8px;color:rgba(255,255,255,0.3);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1px solid rgba(255,255,255,0.06)}
-        td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,0.03);color:rgba(255,255,255,0.6)}
-        .badge{padding:2px 10px;border-radius:6px;font-size:10px;font-weight:600;background:rgba(139,92,246,0.12);color:#a78bfa;font-family:monospace}
-        .badge.active{background:rgba(52,211,153,0.12);color:#34d399}
-        .badge.expired{background:rgba(239,68,68,0.12);color:#f87171}
-        .full{grid-column:1/-1}
-        .stat{text-align:center;background:rgba(255,255,255,0.02);padding:20px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.04)}
-        .stat .label{color:rgba(255,255,255,0.3);font-size:9px;text-transform:uppercase;letter-spacing:1.5px;font-weight:600}
-        .stat .value{font-size:30px;font-weight:700;margin-top:6px}
-        @media(max-width:768px){.grid{grid-template-columns:1fr}.header{flex-direction:column;gap:12px}}
-    </style>
-</head>
-<body>
-    <div class="aurora"><span></span><span></span></div>
-    <div class="container">
-        <div class="header">
-            <h1>LEO <span>MDZ</span> · ADMINISTRAÇÃO</h1>
-            <a href="/admin/logout"><i class="fas fa-sign-out-alt"></i> SAIR</a>
-        </div>
-        <div class="grid">
-            <div class="card">
-                <h2><i class="fas fa-key"></i> GERAR KEY</h2>
-                <div class="field"><label>PREFIXO DA KEY</label><input type="text" id="keyPrefix" value="CRX-HACKS"></div>
-                <div class="field"><label>LIMITE DE IPs</label><input type="number" id="ipLimit" value="1" min="1"></div>
-                <div class="field"><label>VALIDADE (DIAS)</label><input type="number" id="keyDays" value="7" min="1"></div>
-                <button class="btn" onclick="generateKey()"><i class="fas fa-plus"></i> GERAR</button>
-                <div id="generatedKey" style="margin-top:14px;font-family:monospace;color:#a78bfa;font-size:16px;font-weight:600;"></div>
-            </div>
-            <div class="card">
-                <h2><i class="fas fa-chart-line"></i> ESTATÍSTICAS</h2>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
-                    <div class="stat">
-                        <div class="label">TOTAL DE KEYS</div>
-                        <div class="value" style="color:#a78bfa;">{{ keys|length }}</div>
-                    </div>
-                    <div class="stat">
-                        <div class="label">IPS ATIVOS</div>
-                        <div class="value" style="color:#34d399;">{{ ips|length }}</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="card full" style="margin-top:24px;">
-            <h2><i class="fas fa-list"></i> KEYS</h2>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>KEY</th><th>PREFIXO</th><th>LIMITE</th><th>USOS</th><th>DIAS</th><th>CRIADA</th><th>AÇÃO</th></tr></thead>
-                    <tbody>
-                        {% for key, data in keys.items() %}
-                        <tr><td><span class="badge">{{ key }}</span></td><td>{{ data.prefix }}</td><td>{{ data.limit }}</td><td>{{ data.used_ips|length }}</td><td>{{ data.days }}</td><td>{{ data.created[:10] }}</td><td><button class="btn btn-danger btn-sm" onclick="revokeKey('{{ key }}')">REVOGAR</button></td></tr>
-                        {% else %}
-                        <tr><td colspan="7" style="text-align:center;padding:30px;color:rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:1px;">NENHUMA KEY GERADA</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div class="card full" style="margin-top:24px;">
-            <h2><i class="fas fa-users"></i> IPS REGISTRADOS</h2>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>ENDEREÇO IP</th><th>KEY</th><th>EXPIRA</th><th>STATUS</th></tr></thead>
-                    <tbody>
-                        {% for ip, key in ips.items() %}
-                        <tr><td>{{ ip }}</td><td><span class="badge">{{ key }}</span></td><td>{% if key_expiry[ip] %}{{ key_expiry[ip].strftime('%d/%m/%Y') }}{% else %}-{% endif %}</td><td><span class="badge active">ATIVO</span></td></tr>
-                        {% else %}
-                        <tr><td colspan="4" style="text-align:center;padding:30px;color:rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:1px;">NENHUM IP REGISTRADO</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <script>
-        function generateKey(){const prefix=document.getElementById('keyPrefix').value||'CRX-HACKS';const limit=parseInt(document.getElementById('ipLimit').value)||1;const days=parseInt(document.getElementById('keyDays').value)||7;fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix,limit,days})}).then(r=>r.json()).then(d=>{document.getElementById('generatedKey').textContent='✓ '+d.key;setTimeout(()=>location.reload(),1200);});}
-        function revokeKey(key){if(!confirm('REVOGAR '+key+'?'))return;fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}).then(r=>r.json()).then(d=>{if(d.success)location.reload();});}
-    </script>
-</body>
-</html>"""
+UI_CSS = """
+:root{
+--bg-main:#09080e;--bg-sidebar:#0d0c14;--bg-card:#13121d;--bg-card-hover:#181625;
+--bg-card-sub:#181724;--bg-glass:rgba(19,18,29,.75);
+--border-subtle:rgba(255,255,255,.06);--border-medium:rgba(255,255,255,.1);
+--border-purple:rgba(168,85,247,.28);--border-purple-glow:rgba(168,85,247,.5);
+--primary:#9333ea;--primary-light:#a855f7;--primary-glow:#c084fc;
+--primary-gradient:linear-gradient(135deg,#7c3aed 0%,#9333ea 50%,#a855f7 100%);
+--primary-btn-gradient:linear-gradient(180deg,#1e1633 0%,#151026 100%);
+--sidebar-active-gradient:linear-gradient(90deg,#6d28d9 0%,#7c3aed 100%);
+--text-main:#f3f2f8;--text-muted:#918fa4;--text-sub:#636177;--text-dim:#444254;--text-purple:#c084fc;
+--success:#22c55e;--danger:#ef4444;--warning:#f59e0b;
+--font-sans:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+--font-mono:'JetBrains Mono',monospace;
+--radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-full:9999px;
+--shadow-card:0 4px 20px -2px rgba(0,0,0,.4);--shadow-purple-glow:0 0 25px rgba(147,51,234,.25);
+--transition:all .2s cubic-bezier(.16,1,.3,1);
+}
+*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-user-drag:none;-webkit-tap-highlight-color:transparent}
+html,body{max-width:100vw;overflow-x:hidden}
+body{background:var(--bg-main);color:var(--text-main);font-family:var(--font-sans);min-height:100vh;display:flex;flex-direction:column;letter-spacing:-.01em;
+background-image:radial-gradient(circle at 15% 10%,rgba(124,58,237,.09) 0%,transparent 40%),radial-gradient(circle at 85% 90%,rgba(147,51,234,.07) 0%,transparent 45%);
+-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:var(--radius-full)}
+::-webkit-scrollbar-thumb:hover{background:var(--primary-light)}
+input,button,select,textarea{font-family:inherit;outline:none}
+button{corder:0}
 
-LANDING_PAGE = """<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEO MDZ · DESBLOQUEAR</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;position:relative;overflow:hidden}
-        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
-        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16;animation:float 14s ease-in-out infinite}
-        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
-        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
-        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
-        .container{max-width:400px;width:100%;background:rgba(15,15,26,0.88);backdrop-filter:blur(32px);border-radius:28px;padding:44px 36px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.9);position:relative;z-index:1}
-        .brand{text-align:center;margin-bottom:32px}
-        .brand .icon{width:56px;height:56px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;margin-bottom:12px;box-shadow:0 12px 32px rgba(139,92,246,0.35)}
-        .brand h1{color:#fff;font-size:22px;font-weight:300;letter-spacing:4px;text-transform:uppercase}
-        .brand h1 span{color:#a78bfa;font-weight:700}
-        .brand p{color:rgba(255,255,255,0.15);font-size:9px;letter-spacing:3px;margin-top:4px;text-transform:uppercase}
-        .step-status{display:flex;justify-content:center;gap:30px;margin:10px 0 20px 0;font-size:11px;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:600;letter-spacing:1px}
-        .step-status .done{color:#34d399}
-        .social-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:14px;border:none;border-radius:12px;color:#fff;font-size:13px;font-weight:600;text-decoration:none;transition:0.3s;margin:6px 0;font-family:inherit;text-transform:uppercase;letter-spacing:1px}
-        .social-btn.youtube{background:linear-gradient(135deg,#ff0000,#cc0000)}
-        .social-btn.youtube:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(255,0,0,0.35)}
-        .social-btn.telegram{background:linear-gradient(135deg,#0088cc,#006699)}
-        .social-btn.telegram:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,136,204,0.35)}
-        .note{text-align:center;color:rgba(255,255,255,0.25);font-size:10px;margin:8px 0 14px 0;letter-spacing:0.5px;text-transform:uppercase;font-weight:500}
-        .unlock-btn{width:100%;padding:16px;background:linear-gradient(135deg,#34d399,#22d3ee);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:0.3s;margin-top:4px;font-family:inherit;text-transform:uppercase}
-        .unlock-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 28px rgba(52,211,153,0.35)}
-        .unlock-btn:disabled{opacity:0.3;cursor:not-allowed;transform:none}
-        .footer{text-align:center;margin-top:24px;color:rgba(255,255,255,0.08);font-size:8px;letter-spacing:3px;text-transform:uppercase}
-    </style>
-</head>
-<body>
-    <div class="aurora"><span></span><span></span></div>
-    <div class="container">
-        <div class="brand">
-            <div class="icon"><i class="fas fa-unlock-alt"></i></div>
-            <h1>LEO <span>MDZ</span></h1>
-            <p>CRIADOR @LEO MODZ</p>
-        </div>
-        <div class="step-status">
-            <span id="ytStatus"><i class="fab fa-youtube"></i> YOUTUBE</span>
-            <span id="tgStatus"><i class="fab fa-telegram"></i> TELEGRAM</span>
-        </div>
-        <a href="https://youtube.com/@leomodzofc1?si=iOWwXPqx455mXrb_" target="_blank" class="social-btn youtube" onclick="markYouTube()">
-            <i class="fab fa-youtube"></i> INSCREVA-SE PARA CONTINUAR
-        </a>
-        <a href="https://t.me/LEOMDZALLSRCLEAKISBACK" target="_blank" class="social-btn telegram" onclick="markTelegram()">
-            <i class="fab fa-telegram-plane"></i> ENTRE NO TG PARA CONTINUAR
-        </a>
-        <div class="note">INSCREVA-SE E ENTRE NO TG PARA CONTINUAR.</div>
-        <button class="unlock-btn" id="unlockBtn" disabled onclick="unlockProxy()">
-            <i class="fas fa-arrow-right"></i> TOQUE PARA CONTINUAR
-        </button>
-        <div class="footer">SEGURO</div>
-    </div>
-    <script>
-        let ytClicked=false;let tgClicked=false;
-        function markYouTube(){ytClicked=true;document.getElementById('ytStatus').className='done';document.getElementById('ytStatus').innerHTML='<i class="fab fa-youtube"></i> ✓ YOUTUBE';checkUnlock();}
-        function markTelegram(){tgClicked=true;document.getElementById('tgStatus').className='done';document.getElementById('tgStatus').innerHTML='<i class="fab fa-telegram"></i> ✓ TELEGRAM';checkUnlock();}
-        function checkUnlock(){if(ytClicked&&tgClicked){document.getElementById('unlockBtn').disabled=false;}}
-        function unlockProxy(){if(!ytClicked||!tgClicked)return;fetch('/unlock',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.success){window.location.href='/dashboard';}});}
-    </script>
-</body>
-</html>"""
+.app-container{display:flex;flex:1;min-height:100vh}
+.sidebar{width:250px;background:var(--bg-sidebar);border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;justify-content:space-between;padding:24px 16px;flex-shrink:0;position:sticky;top:0;height:100vh;z-index:100}
+.sidebar-top{display:flex;flex-direction:column;gap:24px}
+.sidebar-brand-row{display:flex;align-items:center;justify-content:space-between;padding:0 4px}
+.sidebar-brand{display:flex;align-items:center;cursor:pointer;transition:var(--transition)}
+.sidebar-brand:hover{opacity:.9}
+.sidebar-brand img{height:44px;width:auto;object-fit:contain}
+.sidebar-nav{display:flex;flex-direction:column;gap:6px}
+.nav-item{display:flex;align-items:center;gap:14px;padding:11px 16px;border-radius:var(--radius-md);color:var(--text-muted);font-size:13.5px;font-weight:500;cursor:pointer;transition:var(--transition);border:1px solid transparent;background:transparent;text-decoration:none}
+.nav-item svg{width:18px;height:18px;stroke-width:2;stroke:currentColor;fill:none;transition:var(--transition);flex-shrink:0}
+.nav-item:hover{color:var(--text-main);background:rgba(255,255,255,.035)}
+.nav-item.active{background:var(--sidebar-active-gradient);color:#fff;font-weight:600;box-shadow:0 4px 20px rgba(109,40,217,.45)}
+.nav-item.active svg{stroke:#fff}
+.sidebar-bottom{display:flex;flex-direction:column;gap:10px;margin-top:auto;padding-top:16px}
+.sidebar-user{background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:10px 12px;display:flex;align-items:center;gap:10px;transition:var(--transition)}
+.sidebar-user:hover{border-color:var(--border-purple);box-shadow:0 0 15px rgba(124,58,237,.15)}
+.user-avatar-wrap{position:relative;width:40px;height:40px;flex-shrink:0}
+.user-avatar{width:100%;height:100%;border-radius:50%;border:2px solid var(--primary-light);box-shadow:0 0 10px rgba(168,85,247,.35)}
+.user-info{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.user-name{font-size:13.5px;font-weight:700;color:var(--text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge-pro{background:#581c87;color:#e9d5ff;border:1px solid #7e22ce;font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;text-transform:uppercase;letter-spacing:.05em}
+.user-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)}
+.status-dot-green,.status-dot-red{width:7px;height:7px;border-radius:50%;display:inline-block}
+.status-dot-green{background:var(--success);box-shadow:0 0 8px rgba(34,197,94,.6);animation:pulseGreen 2s infinite}
+.status-dot-red{background:var(--danger);box-shadow:0 0 8px rgba(239,68,68,.6)}
+@keyframes pulseGreen{0%,100%{opacity:1;box-shadow:0 0 8px rgba(34,197,94,.6)}50%{opacity:.4;box-shadow:0 0 12px rgba(34,197,94,.9)}}
+.sidebar-unload-btn{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-md);background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);color:#fda4af;font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition)}
+.sidebar-unload-btn:hover{background:rgba(239,68,68,.12);border-color:var(--danger)}
+.sidebar-unload-btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none}
 
-DASHBOARD_PAGE = """<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEO MDZ · PROXY</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;position:relative;overflow:hidden}
-        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
-        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16;animation:float 14s ease-in-out infinite}
-        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
-        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
-        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
-        .dashboard{max-width:420px;width:100%;background:rgba(15,15,26,0.88);backdrop-filter:blur(32px);border-radius:28px;padding:28px 24px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.9);position:relative;z-index:1}
-        .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
-        .brand{display:flex;align-items:center;gap:12px}
-        .brand-icon{width:40px;height:40px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;box-shadow:0 8px 24px rgba(139,92,246,0.35)}
-        .brand-text{color:#fff;font-size:18px;font-weight:700;letter-spacing:-0.5px;text-transform:uppercase}
-        .brand-text span{background:linear-gradient(135deg,#8b5cf6,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-        .status-badge{display:flex;align-items:center;gap:6px;padding:4px 14px;border-radius:12px;border:1px solid rgba(52,211,153,0.15);background:rgba(52,211,153,0.06)}
-        .status-dot{width:6px;height:6px;border-radius:50%;background:#34d399;animation:pulse 2s infinite}
-        .status-text{color:#34d399;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
-        .ip-bar{background:rgba(255,255,255,0.03);border-radius:14px;padding:10px 14px;margin:10px 0 14px 0;display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,0.05)}
-        .ip-bar i{color:#a78bfa;font-size:12px;opacity:0.5}
-        .ip-bar .ip{color:rgba(255,255,255,0.45);font-size:12px;font-family:monospace;flex:1}
-        .ip-bar .tag{font-size:8px;padding:2px 12px;border-radius:6px;background:rgba(139,92,246,0.12);color:#a78bfa;font-weight:600;letter-spacing:0.5px;text-transform:uppercase}
-        .section{color:rgba(255,255,255,0.3);font-size:8px;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin:16px 0 8px 0}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
-        .item{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:0.3s}
-        .item:hover{background:rgba(255,255,255,0.04);border-color:rgba(139,92,246,0.2)}
-        .item .ico{font-size:14px;width:24px;text-align:center;opacity:0.5}
-        .item .info{flex:1}
-        .item .name{color:rgba(255,255,255,0.6);font-size:11px;font-weight:600;text-transform:uppercase}
-        .item .desc{color:rgba(255,255,255,0.15);font-size:7px;text-transform:uppercase;letter-spacing:0.5px}
-        .sw{width:32px;height:17px;background:rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;position:relative;transition:0.3s;flex-shrink:0;border:1px solid rgba(255,255,255,0.04)}
-        .sw .th{width:13px;height:13px;background:rgba(255,255,255,0.1);border-radius:50%;position:absolute;top:1px;left:1px;transition:0.3s}
-        .sw.on{background:linear-gradient(135deg,#8b5cf6,#ec4899);border-color:transparent}
-        .sw.on .th{left:16px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
-        .note-box{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:12px 14px;margin-top:12px;color:rgba(255,255,255,0.35);font-size:11px;text-align:center;line-height:1.5;text-transform:uppercase;font-weight:500}
-        .note-box a{color:#a78bfa;text-decoration:none;word-break:break-all}
-        .note-box a:hover{text-decoration:underline}
-        .footer{text-align:center;margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.04)}
-        .footer-text{color:rgba(255,255,255,0.15);font-size:8px;letter-spacing:3px;font-weight:700;text-transform:uppercase}
-        .footer-text span{background:linear-gradient(135deg,#8b5cf6,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-        .social-footer{display:flex;gap:12px;justify-content:center;margin-top:8px}
-        .social-footer a{color:rgba(255,255,255,0.1);font-size:20px;transition:0.3s}
-        .social-footer a:hover{color:rgba(255,255,255,0.35)}
-        .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(15,15,26,0.96);border:1px solid rgba(139,92,246,0.15);border-radius:12px;padding:10px 20px;color:#fff;font-size:11px;font-weight:600;backdrop-filter:blur(20px);opacity:0;transition:opacity 0.3s;pointer-events:none;max-width:90%;z-index:999;text-transform:uppercase;letter-spacing:1px}
-        .toast.show{opacity:1}
-        @media(max-width:380px){.grid{grid-template-columns:1fr}}
-    </style>
-</head>
-<body>
-    <div class="aurora"><span></span><span></span></div>
-    <div class="dashboard">
-        <div class="header">
-            <div class="brand">
-                <div class="brand-icon"><i class="fas fa-satellite-dish"></i></div>
-                <div class="brand-text">LEO <span>MDZ</span></div>
-            </div>
-            <div class="status-badge">
-                <div class="status-dot"></div>
-                <div class="status-text">AO VIVO</div>
-            </div>
-        </div>
-        <div class="ip-bar">
-            <i class="fas fa-network-wired"></i>
-            <span class="ip" id="ipDisplay">CARREGANDO...</span>
-            <span class="tag"><i class="fas fa-check-circle"></i> DESBLOQUEADO</span>
-        </div>
+.main-wrapper{flex:1;display:flex;flex-direction:column;min-height:100vh;padding:32px 40px;max-width:1280px;overflow-y:auto}
+.main-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;gap:20px}
+.header-greeting{display:flex;flex-direction:column}
+.greeting-lead{font-size:14.5px;color:var(--text-muted);font-weight:400}
+.greeting-name{font-size:28px;font-weight:800;color:var(--text-purple);line-height:1.15;margin:2px 0 4px;text-shadow:0 0 20px rgba(192,132,252,.3)}
+.greeting-sub{font-size:13px;color:var(--text-sub);font-weight:400}
+.header-widgets{display:flex;align-items:center;gap:12px}
+.widget-card{background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 16px;display:flex;align-items:center;gap:14px;transition:var(--transition)}
+.widget-card:hover{border-color:var(--border-medium)}
+.widget-info{display:flex;flex-direction:column;gap:2px}
+.widget-label{font-size:10px;color:var(--text-sub);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.widget-val{font-size:12.5px;font-weight:700}
+.widget-val.green{color:var(--success);text-shadow:0 0 10px rgba(34,197,94,.4)}
+.widget-val.purple{color:var(--text-purple);font-size:13.5px}
 
-        <div class="section"><i class="fas fa-crosshairs"></i> MIRA</div>
-        <div class="grid">
-            <div class="item" onclick="toggle('hs_neck')">
-                <div class="ico" style="color:#a78bfa;"><i class="fas fa-crosshairs"></i></div>
-                <div class="info"><div class="name">HS PESCOÇO</div><div class="desc">HEADSHOT</div></div>
-                <div class="sw" id="sw_hs_neck"><div class="th"></div></div>
-            </div>
-            <div class="item" onclick="toggle('hs_chest')">
-                <div class="ico" style="color:#f472b6;"><i class="fas fa-bullseye"></i></div>
-                <div class="info"><div class="name">HS PEITO</div><div class="desc">PEITO</div></div>
-                <div class="sw" id="sw_hs_chest"><div class="th"></div></div>
-            </div>
-        </div>
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+.stat-card{background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;transition:var(--transition);position:relative;overflow:hidden}
+.stat-card:hover{border-color:var(--border-purple);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(168,85,247,.3),transparent);opacity:0;transition:var(--transition)}
+.stat-card:hover::before{opacity:1}
+.stat-content{display:flex;flex-direction:column;gap:4px;min-width:0}
+.stat-label{font-size:11.5px;color:var(--text-muted);font-weight:500}
+.stat-value{font-size:15.5px;font-weight:700;color:var(--text-purple);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-icon{width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:center;color:var(--text-sub);transition:var(--transition);flex-shrink:0}
+.stat-card:hover .stat-icon{color:var(--primary-light);border-color:var(--border-purple);background:rgba(147,51,234,.1)}
+.stat-icon svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.8;fill:none}
 
-        <div class="section"><i class="fas fa-sliders-h"></i> CONFIGURAÇÃO</div>
-        <div class="grid">
-            <div class="item" onclick="toggle('backjump_v1')">
-                <div class="ico" style="color:#f87171;"><i class="fas fa-arrow-up"></i></div>
-                <div class="info"><div class="name">BACKJUMP</div><div class="desc">PULO</div></div>
-                <div class="sw" id="sw_backjump_v1"><div class="th"></div></div>
-            </div>
-            <div class="item" onclick="toggle('high_sensi')">
-                <div class="ico" style="color:#f472b6;"><i class="fas fa-sliders-h"></i></div>
-                <div class="info"><div class="name">SENSI ALTA</div><div class="desc">SENSIBILIDADE</div></div>
-                <div class="sw" id="sw_high_sensi"><div class="th"></div></div>
-            </div>
-        </div>
+.features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-bottom:28px}
+.panel-card{background:var(--bg-card);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:22px 24px;display:flex;flex-direction:column;transition:var(--transition);position:relative}
+.panel-card:hover{border-color:var(--border-medium)}
+.panel-card-head{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.panel-card-icon{color:var(--primary-light);display:flex;align-items:center}
+.panel-card-icon svg{width:21px;height:21px;stroke:currentColor;stroke-width:2;fill:none}
+.panel-card-title{font-size:16.5px;font-weight:700;color:var(--text-main);letter-spacing:-.01em}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;min-height:38px;gap:12px}
+.setting-label{font-size:13.5px;font-weight:400;color:#c9c7d8;flex:1}
+.hint-text{font-size:12.5px;line-height:1.45;color:var(--text-muted)}
+.info-val-badge{font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--text-purple)}
 
-        <div class="section"><i class="fas fa-running"></i> MOVIMENTO</div>
-        <div class="grid">
-            <div class="item" onclick="toggle('zig_zag_move')">
-                <div class="ico" style="color:#34d399;"><i class="fas fa-random"></i></div>
-                <div class="info"><div class="name">ZIG ZAG</div><div class="desc">MOVIMENTO</div></div>
-                <div class="sw" id="sw_zig_zag_move"><div class="th"></div></div>
-            </div>
-        </div>
+.toggle-switch{position:relative;width:44px;height:24px;border-radius:var(--radius-full);background:#23222f;border:1px solid var(--border-subtle);cursor:pointer;transition:var(--transition);flex-shrink:0}
+.toggle-switch::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#8c8a9e;transition:var(--transition)}
+.toggle-switch.on{background:#7c3aed;border-color:#8b5cf6;box-shadow:0 0 12px rgba(124,58,237,.5)}
+.toggle-switch.on::after{transform:translateX(20px);background:#fff}
 
-        <div class="note-box">
-            <i class="fas fa-info-circle" style="color:#a78bfa;margin-right:6px;"></i>
-            SE O JOGO NÃO ABRIR, COPIE E COLE/ABRA O LINK ACIMA NO CHROME<br>
-            <a href="https://leomdzproxy-production.up.railway.app" target="_blank">https://leomdzproxy-production.up.railway.app</a>
-        </div>
+.btn-action-load{width:100%;padding:11px 16px;border-radius:var(--radius-md);background:var(--primary-btn-gradient);border:1px solid rgba(147,51,234,.4);color:var(--text-main);font-size:13.5px;font-weight:600;cursor:pointer;transition:var(--transition);display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05);min-height:42px}
+.btn-action-load:hover{border-color:var(--primary-light);box-shadow:0 0 15px rgba(147,51,234,.3);transform:translateY(-1px)}
+.btn-action-load:active{transform:translateY(0)}
+.btn-action-load.btn-positive{background:var(--primary-gradient);border-color:transparent;color:#fff}
+.btn-action-load.btn-danger{background:#2b1219;border-color:rgba(239,68,68,.5);color:#fca5a5}
+.btn-action-load.btn-danger:hover{border-color:var(--danger);box-shadow:0 0 15px rgba(239,68,68,.3)}
 
-        <div class="social-footer">
-            <a href="https://youtube.com/@leomodzofc1?si=iOWwXPqx455mXrb_" target="_blank"><i class="fab fa-youtube"></i></a>
-            <a href="https://t.me/LEOMDZALLSRCLEAKISBACK" target="_blank"><i class="fab fa-telegram"></i></a>
-        </div>
+.field{margin:16px 0}
+.field label{display:block;color:#aab3bf;font-weight:700;font-size:10px;font-family:var(--font-mono);letter-spacing:2px;text-transform:uppercase;margin-bottom:9px}
+.field input,.field select{width:100%;padding:13px 14px;background:#0b0e14;border:1px solid var(--border-subtle);color:#fff;font-size:13px;border-radius:var(--radius-sm);transition:var(--transition)}
+.field input:focus,.field select:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px rgba(168,85,247,.15)}
 
-        <div class="footer"><div class="footer-text"><span>LEO MDZ</span> · PROXY</div></div>
-    </div>
-    <div class="toast" id="toast"></div>
-    <script>
-        const nomes = {
-            'hs_neck': 'HS PESCOÇO',
-            'hs_chest': 'HS PEITO',
-            'backjump_v1': 'BACKJUMP',
-            'high_sensi': 'SENSI ALTA',
-            'zig_zag_move': 'ZIG ZAG'
-        };
-        function toast(msg) {
-            const t = document.getElementById('toast');
-            t.textContent = msg;
-            t.className = 'toast show';
-            clearTimeout(t._h);
-            t._h = setTimeout(() => t.className = 'toast', 1800);
-        }
+.table-wrap{overflow-x:auto;width:100%}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{text-align:left;padding:10px 12px;color:var(--text-muted);font-size:10px;font-family:var(--font-mono);letter-spacing:1.2px;text-transform:uppercase;border-bottom:1px solid var(--border-subtle)}
+tbody td{padding:11px 12px;border-bottom:1px solid var(--border-subtle);color:#dbd9e5}
+.badge{font-family:var(--font-mono);font-size:11.5px;color:var(--text-purple);background:rgba(147,51,234,.1);border:1px solid rgba(168,85,247,.25);padding:3px 8px;border-radius:6px}
+.generated{margin-top:14px;padding:12px;background:#0d1014;border:1px solid var(--border-purple);border-radius:var(--radius-md);font-family:var(--font-mono);font-size:13px;color:var(--primary-glow);display:none;text-align:center}
+.generated.show{display:block;animation:fadeIn .3s ease}
 
-        fetch('/api/ip/check').then(r=>r.json()).then(d=>{
-            document.getElementById('ipDisplay').textContent = d.ip || 'DESCONHECIDO';
-        });
+.glass{background:rgba(19,18,29,.75);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.page-section{display:none;animation:tabFadeIn .3s ease}
+.page-section.active{display:block}
+@keyframes tabFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 
-        // Carregar configuração atual
-        fetch('/api/status').then(r=>r.json()).then(d=>{
-            const c = d.config;
-            document.getElementById('sw_hs_neck').className = 'sw' + (c.HS_NECK ? ' on' : '');
-            document.getElementById('sw_hs_chest').className = 'sw' + (c.HS_CHEST ? ' on' : '');
-            document.getElementById('sw_backjump_v1').className = 'sw' + (c.BACKJUMPV1 ? ' on' : '');
-            document.getElementById('sw_high_sensi').className = 'sw' + (c.HIGH_SENSI ? ' on' : '');
-            document.getElementById('sw_zig_zag_move').className = 'sw' + (c.ZIG_ZAG_MOVE ? ' on' : '');
-        });
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--bg-card);border:1px solid var(--border-purple);color:var(--text-main);padding:12px 22px;border-radius:var(--radius-md);font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:var(--transition);z-index:1000;box-shadow:var(--shadow-purple-glow)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.danger{border-color:rgba(239,68,68,.5)}
 
-        function toggle(feature) {
-            const el = document.getElementById('sw_' + feature);
-            const on = el.classList.contains('on');
-            const val = !on;
+.closing-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);z-index:9999;display:none;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .4s ease}
+.closing-overlay.on{display:flex;opacity:1;pointer-events:auto}
+.closing-inner{display:flex;flex-direction:column;align-items:center;gap:16px}
+.spinner{width:36px;height:36px;border:2px solid rgba(168,85,247,.2);border-top-color:var(--primary-light);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.closing-msg{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);letter-spacing:.2em;text-transform:uppercase}
 
-            // Atualiza a interface imediatamente
-            el.className = 'sw' + (val ? ' on' : '');
+/* --- AUTH (login / key gate) --- */
+.auth-shell{width:min(980px,100%);min-height:560px;display:grid;grid-template-columns:1.05fr .95fr;border:1px solid var(--border-subtle);background:rgba(18,22,30,.94);box-shadow:0 32px 90px #0008;border-radius:var(--radius-lg);overflow:hidden;animation:tabFadeIn .4s ease}
+.auth-visual{padding:58px;display:flex;flex-direction:column;justify-content:space-between;border-right:1px solid var(--border-subtle);background:linear-gradient(150deg,#1a121f,#0d0c14 55%)}
+.auth-visual .brand{display:flex;align-items:center;gap:12px;font-weight:900;letter-spacing:3px;font-size:18px}
+.auth-visual .brand img{height:42px;width:auto;object-fit:contain}
+.auth-label{font-weight:700;font-size:10px;font-family:var(--font-mono);letter-spacing:3px;color:var(--primary-light);text-transform:uppercase}
+.auth-visual h1{font-size:52px;line-height:.95;letter-spacing:-4px;margin:0;max-width:400px}
+.auth-visual h1 span{background:var(--primary-gradient);-webkit-background-clip:text;background-clip:text;color:transparent}
+.auth-visual p{color:var(--text-muted);line-height:1.7;max-width:360px}
+.auth-serial{font-family:var(--font-mono);font-size:11px;color:var(--text-sub);letter-spacing:2px}
+.auth-form{padding:58px 52px;display:flex;flex-direction:column;justify-content:center;background:#11141a}
+.auth-form h2{font-size:30px;margin:10px 0 8px}
+.auth-form .sub{color:var(--text-muted);margin:0 0 6px}
+.error{margin-top:14px;color:#fca5a5;font-size:13px;font-weight:600}
+.success{margin-top:14px;color:var(--success);font-size:13px;font-weight:600}
+.btn-auth{width:100%;padding:15px;border:0;border-radius:var(--radius-md);background:var(--primary-gradient);color:#fff;font-weight:900;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:var(--transition);box-shadow:0 8px 24px rgba(124,58,237,.35)}
+.btn-auth:hover{box-shadow:0 0 25px rgba(147,51,234,.5);transform:translateY(-1px)}
+.foot{margin-top:26px;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;letter-spacing:1.5px}
+.main-footer{margin-top:auto;padding-top:24px;border-top:1px solid var(--border-subtle);font-size:11.5px;color:var(--text-muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.footer-brand{color:var(--text-purple);font-weight:600}
+@media(max-width:900px){.sidebar{display:none}.main-wrapper{padding:24px 16px}.stats-grid{grid-template-columns:repeat(2,1fr)}.features-grid{grid-template-columns:1fr}.auth-shell{grid-template-columns:1fr}.auth-visual{display:none}}
+"""
 
-            fetch('/api/toggle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({feature: feature, value: val})
-            }).then(r=>r.json()).then(d=>{
-                if(d.success) {
-                    toast(nomes[feature] + ' ' + (val ? 'LIGADO' : 'DESLIGADO'));
-                } else {
-                    // Reverte em caso de erro
-                    el.className = 'sw' + (!val ? ' on' : '');
-                    toast('ERRO AO ALTERAR ' + nomes[feature]);
-                }
-            }).catch(err => {
-                // Reverte em caso de erro
-                el.className = 'sw' + (!val ? ' on' : '');
-                toast('ERRO AO ALTERAR ' + nomes[feature]);
-            });
-        }
-    </script>
-</body>
-</html>"""
+LOGIN_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Kaze Bypass Â· Admin</title>"
+    "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
+    "<style>" + UI_CSS + "</style></head><body><main style='display:grid;place-items:center;min-height:100vh;padding:24px'>"
+    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><img src='/static/kaze_logo.png' alt='KAZE BYPASS'></div>"
+    "<div style='margin-top:64px' class='auth-label'>PRIVATE CONTROL SYSTEM</div>"
+    "<h1>Enter the<br><span>operator</span><br>console.</h1>"
+    "<p>Area administrativa para controle de acessos, keys e sessoes ativas.</p></div><div class='auth-serial'>NODE / 07 Â· AUTH REQUIRED</div></section>"
+    "<section class='auth-form'><div class='auth-label'>ADMIN AUTHENTICATION</div><h2>Entrar no painel</h2><p class='sub'>Informe suas credenciais para continuar.</p>"
+    "<form method='POST' autocomplete='on'><div class='field'><label for='username'>Usuario</label><input id='username' name='username' required autocomplete='username' placeholder='seu usuario'></div>"
+    "<div class='field'><label for='password'>Senha</label><input id='password' type='password' name='password' required autocomplete='current-password' placeholder='sua senha'></div>"
+    "<button class='btn-auth' type='submit'>Acessar console &#8594;</button>{% if error %}<div class='error'>{{ error }}</div>{% endif %}</form>"
+    "<div class='foot'>&#128737; SESSAO PROTEGIDA Â· KAZE BYPASS</div></section></section></main></body></html>")
+
+KEY_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Kaze Bypass Â· Access</title>"
+    "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
+    "<style>" + UI_CSS + "</style></head><body><main style='display:grid;place-items:center;min-height:100vh;padding:24px'>"
+    "<section class='auth-shell'><section class='auth-visual'><div><div class='brand'><img src='/static/kaze_logo.png' alt='KAZE BYPASS'></div>"
+    "<div style='margin-top:64px' class='auth-label' style='color:#a855f7'>ACCESS GATE / 01</div>"
+    "<h1>One key.<br><span>Full access.</span></h1>"
+    "<p>Use a key issued by the administrator to open your control dashboard.</p></div><div class='auth-serial'>SECURE CHANNEL Â· READY</div></section>"
+    "<section class='auth-form'><div class='auth-label'>USER ACCESS</div><h2>Validar acesso</h2><p class='sub'>Cole sua key para continuar.</p>"
+    "<form id='keyForm'><div class='field'><label for='accessKey'>Access key</label><input id='accessKey' required spellcheck='false' placeholder='KAZE-BYPASS-0000'></div>"
+    "<button class='btn-auth' type='submit' id='openBtn'>Abrir dashboard &#8599;</button><div id='keyError' role='alert'></div></form>"
+    "<div class='hint-text' style='margin-top:14px'>Keys sao geradas exclusivamente pelo administrador.</div>"
+    "<div class='foot'>&#128274; ENCRYPTED SESSION</div></section></section></main>"
+    "<div class='toast' id='toast'></div>"
+    "<script>document.getElementById('keyForm').addEventListener('submit',async e=>{e.preventDefault();const b=document.getElementById('openBtn'),m=document.getElementById('keyError');b.disabled=true;m.textContent='VALIDANDO KEY...';m.className='success';try{const r=await fetch('/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:document.getElementById('accessKey').value.trim()})});const d=await r.json();if(!r.ok||!d.success)throw Error(d.message||'KEY INVALIDA');toast('Acesso liberado','');location.href='/dashboard'}catch(err){m.textContent=err.message;m.className='error';b.disabled=false}});function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}</script>"
+    "</body></html>")
+
+ADMIN_DASHBOARD = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Kaze Bypass Â· Admin</title>"
+    "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
+    "<style>" + UI_CSS + "</style></head><body>"
+    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><img src='/static/kaze_logo.png' alt='KAZE BYPASS'></div></div>"
+    "<nav class='sidebar-nav'><a class='nav-item active' href='/admin/dashboard'><svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/></svg><span>Overview</span></a>"
+    "<a class='nav-item' href='#keys'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg><span>Keys</span></a>"
+    "<a class='nav-item' href='#ips'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg><span>Sessions</span></a></nav></div>"
+    "<div class='sidebar-bottom'><div class='sidebar-user'><div class='user-avatar-wrap'><div style='width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--primary-gradient);font-weight:900;color:#fff'>A</div></div>"
+    "<div class='user-info'><div style='display:flex;align-items:center;gap:6px'><span class='user-name'>Admin</span><span class='badge-pro'>PRO</span></div>"
+    "<div class='user-status'><span class='status-dot-green'></span><span>Online</span></div></div></div>"
+    "<a class='sidebar-unload-btn' href='/admin/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Encerrar sessao</span></a></div></aside>"
+    "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name'>Operations</h1><span class='greeting-sub'>Console administrativo do Kaze Bypass.</span></div>"
+    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green'>&#9679; ONLINE</span></div></div>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Total keys</span><span class='widget-val purple' id='totalKeysWidget'>{{ keys|length }}</span></div></div></div></header>"
+    "<section class='stats-grid'>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Total Keys</span><span class='stat-value'>{{ keys|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>IPs Ativos</span><span class='stat-value'>{{ ips|length }}</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Validade Padrao</span><span class='stat-value' id='statDays'>7 dias</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>Kaze Bypass</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
+    "</section>"
+    "<div class='features-grid'>"
+    "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4'/></svg></div><h2 class='panel-card-title'>Emitir nova key</h2></div>"
+    "<div class='field'><label>Prefixo</label><input id='keyPrefix' value='KAZE-BYPASS'></div>"
+    "<div class='field'><label>Limite de IPs</label><input id='ipLimit' type='number' value='1' min='1'></div>"
+    "<div class='field'><label>Validade em dias</label><input id='keyDays' type='number' value='7' min='1'></div>"
+    "<button class='btn-action-load btn-positive' onclick='generateKey()'>Gerar key &#8594;</button><div id='generatedKey' class='generated'></div></section>"
+    "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='10'/><polyline points='12 6 12 12 16 14'/></svg></div><h2 class='panel-card-title'>Resumo</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>Keys emitidas</span><span class='info-val-badge'>{{ keys|length }}</span></div>"
+    "<div class='setting-row'><span class='setting-label'>IPs registrados</span><span class='info-val-badge'>{{ ips|length }}</span></div>"
+    "<div class='setting-row'><span class='setting-label'>Status do servico</span><span class='widget-val green'>&#9679; Online</span></div></section>"
+    "</div>"
+    "<h2 class='panel-card-title' id='keys' style='margin:32px 0 12px'>Keys emitidas</h2>"
+    "<div class='panel-card'><div style='display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border-subtle)'><span style='color:var(--text-muted);font-size:13px'>{{ keys|length }} key(s) no total</span>"
+    "<button class='btn-action-load btn-positive' style='min-height:34px;padding:8px 16px;width:auto' onclick=\"copyAllKeys()\">&#128203; Copiar todas</button></div>"
+    "<div class='table-wrap'><table><thead><tr><th>KEY</th><th>LIMIT</th><th>USOS</th><th>VALIDADE</th><th>ACAO</th></tr></thead><tbody>"
+    "{% for key, data in keys.items() %}<tr><td><span class='badge'>{{ key }}</span></td><td>{{ data.limit }}</td><td>{{ data.used_ips|length }}</td><td>{{ data.days }} dias</td><td style='white-space:nowrap'><button class='btn-action-load' style='min-height:32px;padding:8px 14px;width:auto;margin-right:6px' onclick=\"copyKey('{{ key }}')\">COPIAR</button><button class='btn-action-load btn-danger' style='min-height:32px;padding:8px 14px;width:auto' onclick=\"revokeKey('{{ key }}')\">REVOGAR</button></td></tr>{% else %}<tr><td colspan='5' style='color:var(--text-muted);text-align:center'>Nenhuma key emitida ainda.</td></tr>{% endfor %}"
+    "</tbody></table></div></div>"
+    "<h2 class='panel-card-title' id='ips' style='margin:32px 0 12px'>Sessoes ativas</h2>"
+    "<div class='panel-card'><div class='table-wrap'><table><thead><tr><th>IP</th><th>KEY</th><th>EXPIRA EM</th></tr></thead><tbody>"
+    "{% for ip, exp in key_expiry.items() %}<tr><td><span class='badge'>{{ ip }}</span></td><td>{{ ips.get(ip, '') }}</td><td>{{ exp.strftime('%d/%m/%Y') if exp else '-' }}</td></tr>{% else %}<tr><td colspan='3' style='color:var(--text-muted);text-align:center'>Nenhuma sessao ativa.</td></tr>{% endfor %}"
+    "</tbody></table></div></div>"
+    "<footer class='main-footer'><span class='footer-brand'>KAZE BYPASS</span><span class='footer-text-plain'>v2.0 Â· Security First</span></footer></main></div>"
+    "<div class='toast' id='toast'></div>"
+    "<div class='closing-overlay' id='closing'><div class='closing-inner'><div class='spinner'></div><div class='closing-msg'>PROCESSANDO</div></div></div>"
+    "<script>"
+    "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
+    "function closing(on){document.getElementById('closing').classList.toggle('on',on)}"
+    "async function generateKey(){const d=document.getElementById('keyDays').value*1||7;document.getElementById('statDays').textContent=d+' dias';"
+    "closing(true);try{const r=await fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:document.getElementById('keyPrefix').value,limit:document.getElementById('ipLimit').value,days:d})});"
+    "const j=await r.json();if(j.error)throw Error(j.error);const el=document.getElementById('generatedKey');el.textContent=j.key;el.classList.add('show');"
+    "toast('Key gerada: '+j.key);setTimeout(()=>location.reload(),1200)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "async function revokeKey(k){if(!confirm('Revogar a key '+k+'?'))return;closing(true);try{const r=await fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});"
+    "const j=await r.json();if(j.error)throw Error(j.error);toast('Key revogada');setTimeout(()=>location.reload(),800)}catch(e){toast(e.message,'danger')}finally{closing(false)}}"
+    "function doCopy(txt,msg){const done=()=>toast(msg);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done).catch(()=>{fallbackCopy(txt);done()})}else{fallbackCopy(txt);done()}}"
+    "function fallbackCopy(txt){const t=document.createElement('textarea');t.value=txt;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}"
+    "function copyKey(k){doCopy(k,'Key copiada: '+k)}"
+    "function copyAllKeys(){const all={{ all_keys|tojson }};const list=all.split('\\n').map(s=>s.trim()).filter(Boolean);if(!list.length){toast('Nenhuma key para copiar','danger');return}doCopy(list.join('\\n'),list.length+' key(s) copiada(s)')}"
+    "</script></body></html>")
+
+DASHBOARD_PAGE = ("<!doctype html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Kaze Bypass Â· Dashboard</title>"
+    "<link href='https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap' rel='stylesheet'>"
+    "<style>" + UI_CSS + "</style></head><body>"
+    "<div class='app-container'><aside class='sidebar'><div class='sidebar-top'><div class='sidebar-brand-row'><div class='sidebar-brand'><img src='/static/kaze_logo.png' alt='KAZE BYPASS'></div></div>"
+    "<nav class='sidebar-nav'><a class='nav-item active' href='/dashboard'><svg viewBox='0 0 24 24'><rect x='3' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='3' width='7' height='7' rx='1.5'/><rect x='14' y='14' width='7' height='7' rx='1.5'/><rect x='3' y='14' width='7' height='7' rx='1.5'/></svg><span>Painel</span></a>"
+    "<a class='nav-item' href='#mira'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg><span>Aim</span></a>"
+    "<a class='nav-item' href='#modulos'><svg viewBox='0 0 24 24'><path d='M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6'/></svg><span>Modules</span></a></nav></div>"
+    "<div class='sidebar-bottom'><div class='sidebar-user'><div class='user-avatar-wrap'><div style='width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--primary-gradient);font-weight:900;color:#fff'>K</div></div>"
+    "<div class='user-info'><div style='display:flex;align-items:center;gap:6px'><span class='user-name'>Kaze User</span><span class='badge-pro'>PRO</span></div>"
+    "<div class='user-status'><span class='status-dot-green'></span><span>Online</span></div></div></div>"
+    "<a class='sidebar-unload-btn' href='/logout'><svg viewBox='0 0 24 24'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg><span>Unload / Sair</span></a></div></aside>"
+    "<main class='main-wrapper'><header class='main-header'><div class='header-greeting'><span class='greeting-lead'>Bem-vindo de volta,</span><h1 class='greeting-name' id='headerGreetingUser'>Kaze User</h1><span class='greeting-sub'>Tenha um bom desempenho.</span></div>"
+    "<div class='header-widgets'><div class='widget-card'><div class='widget-info'><span class='widget-label'>Status</span><span class='widget-val green' id='driverStatusVal'>&#9679; ONLINE</span></div></div>"
+    "<div class='widget-card'><div class='widget-info'><span class='widget-label'>Expira em</span><span class='widget-val purple' id='authExpiry'>-</span></div><div class='icon-box-purple' style='width:32px;height:32px;border-radius:8px;background:rgba(147,51,234,.15);border:1px solid rgba(168,85,247,.25);display:flex;align-items:center;justify-content:center'><svg viewBox='0 0 24 24' width='16' height='16' stroke='#a855f7' stroke-width='2' fill='none'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg></div></div></div></header>"
+    "<section class='stats-grid'>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Produto</span><span class='stat-value'>Kaze Bypass</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Plano</span><span class='stat-value' id='statPlan'>Remote Client</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Versao</span><span class='stat-value'>v2.0</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><polygon points='12 2 2 7 12 12 22 7 12 2'/><polyline points='2 17 12 22 22 17'/><polyline points='2 12 12 17 22 12'/></svg></div></div>"
+    "<div class='stat-card'><div class='stat-content'><span class='stat-label'>Seu IP</span><span class='stat-value' id='statIp'>-</span></div><div class='stat-icon'><svg viewBox='0 0 24 24'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg></div></div>"
+    "</section>"
+    "<div class='features-grid' id='modulos'>"
+    "<section class='panel-card' id='mira'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><line x1='12' y1='3' x2='12' y2='7'/><line x1='12' y1='17' x2='12' y2='21'/><line x1='3' y1='12' x2='7' y2='12'/><line x1='17' y1='12' x2='21' y2='12'/><circle cx='12' cy='12' r='2'/></svg></div><h2 class='panel-card-title'>Mira Â· Precisao</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>HS Pescoco</span><div class='toggle-switch' id='sw_hs_neck' onclick=\"opt('hs_neck',this)\"></div></div>"
+    "<div class='setting-row'><span class='setting-label'>HS Peito</span><div class='toggle-switch' id='sw_hs_chest' onclick=\"opt('hs_chest',this)\"></div></div>"
+    "<div class='setting-row'><span class='setting-label'>Sensibilidade alta</span><div class='toggle-switch' id='sw_high_sensi' onclick=\"opt('high_sensi',this)\"></div></div></section>"
+    "<section class='panel-card'><div class='panel-card-head'><div class='panel-card-icon'><svg viewBox='0 0 24 24'><path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/></svg></div><h2 class='panel-card-title'>Movimento</h2></div>"
+    "<div class='setting-row'><span class='setting-label'>Back Jump V1</span><div class='toggle-switch' id='sw_backjump_v1' onclick=\"opt('backjump_v1',this)\"></div></div>"
+    "<div class='setting-row'><span class='setting-label'>Zig Zag Move</span><div class='toggle-switch' id='sw_zig_zag_move' onclick=\"opt('zig_zag_move',this)\"></div></div></section>"
+    "</div>"
+    "<footer class='main-footer'><span class='footer-brand'>KAZE BYPASS</span><span class='footer-text-plain'>v2.0 Â· Security First</span></footer></main></div>"
+    "<div class='toast' id='toast'></div>"
+    "<script>"
+    "function toast(msg,cls){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(cls||'');setTimeout(()=>t.classList.remove('show'),2600)}"
+    "async function load(){try{const r=await fetch('/api/status');const d=await r.json();document.getElementById('statIp').textContent=d.ip||'-';document.getElementById('authExpiry').textContent=d.expires?new Date(d.expires).toLocaleDateString('pt-BR'):'-';"
+    "const map={HS_NECK:'sw_hs_neck',HS_CHEST:'sw_hs_chest',BACKJUMPV1:'sw_backjump_v1',HIGH_SENSI:'sw_high_sensi',ZIG_ZAG_MOVE:'sw_zig_zag_move'};"
+    "for(const k in map){const el=document.getElementById(map[k]);if(el)el.classList.toggle('on',!!d.config[k])}}catch(e){}}"
+    "async function opt(feature,el){const next=!el.classList.contains('on');el.classList.toggle('on',next);try{const r=await fetch('/api/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feature:feature,value:next})});const d=await r.json();if(d.error)throw Error(d.error);toast('Modulo '+(next?'ativado':'desativado'))}catch(e){el.classList.toggle('on',!next);toast(e.message,'danger')}}"
+    "load()"
+    "</script></body></html>")
 
 # ==================== MAIN ====================
 def get_public_ip():
