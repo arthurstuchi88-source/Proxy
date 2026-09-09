@@ -44,33 +44,152 @@ DEFAULT_CONFIG = {
     "ZIG_ZAG_MOVE": True
 }
 
-# ==================== VER.PHP PERSONALIZADO ====================
-# Este é o JSON que será enviado para o jogo
-# Modificado para ACEITAR o hack sem banir
+# ==================== KEEP ALIVE ====================
+def keep_alive():
+    while True:
+        try:
+            requests.get(f"http://localhost:{PORT}/api/ping", timeout=5)
+        except:
+            pass
+        time.sleep(240)
 
-CUSTOM_VER_RESPONSE = {
-    "code": 2,
-    "use_login_optional_download": False,
-    "use_background_download": False,
-    "use_background_download_lobby": False,
-    "country_code": "BR",
-    "gdpr_version": 0,
-    "billboard_cdn_url": "",
-    "billboard_msg": "",
-    "web_url": "",
-    "billboard_bg_url": "",
-    "max_store": "",
-    "max_web": "",
-    "max_video": "",
-    "patchnote_url": "",
-    "multi_region": "",
-    "appstore_url": "http://www.freefiremobile.com/",
-    "backup_appstore_url": "",
-    "garena_login": False,
-    "garena_hint": False,
-    "gop_url": "",
-    # ============ GAMEVAR PERSONALIZADO ============
-    "gamevar": """var_name,comment,var_type,var_value
+@app.route('/api/ping')
+def ping():
+    return jsonify({'status': 'alive', 'time': datetime.now().isoformat()})
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
+# ==================== DATA PERSISTENCE ====================
+
+def save_data():
+    data = {
+        'user_configs': user_configs,
+        'registered_ips': registered_ips,
+        'generated_keys': generated_keys,
+        'key_expiry': {ip: exp.isoformat() for ip, exp in key_expiry.items()}
+    }
+    try:
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving data: {e}")
+
+def load_data():
+    global user_configs, registered_ips, generated_keys, key_expiry
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r') as f:
+                data = json.load(f)
+            user_configs = data.get('user_configs', {})
+            registered_ips = data.get('registered_ips', {})
+            generated_keys = data.get('generated_keys', {})
+            key_expiry = {}
+            for ip, exp_str in data.get('key_expiry', {}).items():
+                try:
+                    key_expiry[ip] = datetime.fromisoformat(exp_str)
+                except:
+                    pass
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            user_configs = {}
+            registered_ips = {}
+            generated_keys = {}
+            key_expiry = {}
+    else:
+        user_configs = {}
+        registered_ips = {}
+        generated_keys = {}
+        key_expiry = {}
+        save_data()
+
+load_data()
+
+# ========================================================
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'logged_in' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def get_client_ip():
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    return request.remote_addr
+
+def get_user_config(client_ip):
+    if client_ip not in user_configs:
+        user_configs[client_ip] = DEFAULT_CONFIG.copy()
+        save_data()
+    return user_configs[client_ip]
+
+def generate_key(prefix="CRX-HACKS"):
+    random_part = ''.join(random.choices(string.digits, k=4))
+    return f"{prefix}-{random_part}"
+
+def sha1_b64(data):
+    return base64.b64encode(hashlib.sha1(data).digest()).decode()
+
+def patch_fileinfo(original_text, config):
+    if not config.get("HS_NECK", False) and not config.get("HS_CHEST", False):
+        return original_text
+    lines = original_text.splitlines()
+    new_lines = []
+    cache_res_file = os.path.join(BASE_DIR, "cache_res")
+    cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
+    for line in lines:
+        if line.startswith("cache_res,"):
+            if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
+                try:
+                    with open(cache_res_file, "rb") as f:
+                        gz_data = f.read()
+                    raw_data = gzip.decompress(gz_data)
+                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
+                    new_lines.append(new_line)
+                except:
+                    new_lines.append(line)
+            elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
+                try:
+                    with open(cache_res2_file, "rb") as f:
+                        gz_data = f.read()
+                    raw_data = gzip.decompress(gz_data)
+                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
+                    new_lines.append(new_line)
+                except:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+    return "\n".join(new_lines)
+
+def get_ver_response(client_ip):
+    """Retorna o ver.php completo com o IP do cliente"""
+    return {
+        "code": 2,
+        "use_login_optional_download": False,
+        "use_background_download": False,
+        "use_background_download_lobby": False,
+        "country_code": "BR",
+        "client_ip": client_ip,  # IP REAL do jogador
+        "gdpr_version": 0,
+        "billboard_cdn_url": "",
+        "billboard_msg": "",
+        "web_url": "",
+        "billboard_bg_url": "",
+        "max_store": "",
+        "max_web": "",
+        "max_video": "",
+        "patchnote_url": "",
+        "multi_region": "",
+        "appstore_url": "http://www.freefiremobile.com/",
+        "backup_appstore_url": "",
+        "garena_login": False,
+        "garena_hint": False,
+        "gop_url": "",
+        "gamevar": """var_name,comment,var_type,var_value
 ANODisabledRegions,关闭MTP的地区,string,"IND,NA"
 ANODisabledClientVariant,ANODisabledClientVariant,string,"ClientUsingVersion_MAX_HPE,ClientUsingVersion_FFI,ClientUsingVersion_MAX|IND,ClientUsingVersion_MAX|NA,ClientUsingVersion_NORMAL|NA"
 EnableMtpLiteDataRegion,mtp轻特征开关,string,"BR,EUROPE,ID,ME,US,RU,SAC,SG,TH,TW,VN,PK,ZA,BD"
@@ -214,133 +333,12 @@ EnableSubstrateCheck,EnableSubstrateCheck,bool,false
 DisableSubstrateCheck,DisableSubstrateCheck,bool,true
 EnableCydiaCheck,EnableCydiaCheck,bool,false
 DisableCydiaCheck,DisableCydiaCheck,bool,true""",
-    "device_whitelist_version": "1.6.0",
-    "whitelist_mask": 0,
-    "device_whitelist_sp_version": "1.0.0",
-    "whitelist_sp_mask": 0,
-    "ggp_url": "gin.freefiremobile.com"
-}
-
-# ==================== KEEP ALIVE ====================
-def keep_alive():
-    while True:
-        try:
-            requests.get(f"http://localhost:{PORT}/api/ping", timeout=5)
-        except:
-            pass
-        time.sleep(240)
-
-@app.route('/api/ping')
-def ping():
-    return jsonify({'status': 'alive', 'time': datetime.now().isoformat()})
-
-threading.Thread(target=keep_alive, daemon=True).start()
-
-# ==================== DATA PERSISTENCE ====================
-
-def save_data():
-    data = {
-        'user_configs': user_configs,
-        'registered_ips': registered_ips,
-        'generated_keys': generated_keys,
-        'key_expiry': {ip: exp.isoformat() for ip, exp in key_expiry.items()}
+        "device_whitelist_version": "1.6.0",
+        "whitelist_mask": 0,
+        "device_whitelist_sp_version": "1.0.0",
+        "whitelist_sp_mask": 0,
+        "ggp_url": "gin.freefiremobile.com"
     }
-    try:
-        with open(DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving data: {e}")
-
-def load_data():
-    global user_configs, registered_ips, generated_keys, key_expiry
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r') as f:
-                data = json.load(f)
-            user_configs = data.get('user_configs', {})
-            registered_ips = data.get('registered_ips', {})
-            generated_keys = data.get('generated_keys', {})
-            key_expiry = {}
-            for ip, exp_str in data.get('key_expiry', {}).items():
-                try:
-                    key_expiry[ip] = datetime.fromisoformat(exp_str)
-                except:
-                    pass
-        except Exception as e:
-            print(f"Error loading data: {e}")
-            user_configs = {}
-            registered_ips = {}
-            generated_keys = {}
-            key_expiry = {}
-    else:
-        user_configs = {}
-        registered_ips = {}
-        generated_keys = {}
-        key_expiry = {}
-        save_data()
-
-load_data()
-
-# ========================================================
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def get_client_ip():
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
-    return request.remote_addr
-
-def get_user_config(client_ip):
-    if client_ip not in user_configs:
-        user_configs[client_ip] = DEFAULT_CONFIG.copy()
-        save_data()
-    return user_configs[client_ip]
-
-def generate_key(prefix="CRX-HACKS"):
-    random_part = ''.join(random.choices(string.digits, k=4))
-    return f"{prefix}-{random_part}"
-
-def sha1_b64(data):
-    return base64.b64encode(hashlib.sha1(data).digest()).decode()
-
-def patch_fileinfo(original_text, config):
-    if not config.get("HS_NECK", False) and not config.get("HS_CHEST", False):
-        return original_text
-    lines = original_text.splitlines()
-    new_lines = []
-    cache_res_file = os.path.join(BASE_DIR, "cache_res")
-    cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
-    for line in lines:
-        if line.startswith("cache_res,"):
-            if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
-                try:
-                    with open(cache_res_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-                try:
-                    with open(cache_res2_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            else:
-                new_lines.append(line)
-        else:
-            new_lines.append(line)
-    return "\n".join(new_lines)
 
 # ==================== ROUTES ====================
 
@@ -449,13 +447,20 @@ def verify_key():
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
-    """SERVE O VER.PHP PERSONALIZADO"""
+    """Retorna o ver.php com o IP real do cliente"""
     client_ip = get_client_ip()
-    print(f"📥 VER.PHP PERSONALIZADO para {client_ip}")
+    print(f"📥 VER.PHP para {client_ip}")
     
-    # Retorna o JSON personalizado
+    # Pega o IP real do cliente
+    ver_data = get_ver_response(client_ip)
+    
+    # Adiciona a URL do CDN personalizada
+    ver_data["cdn_url"] = f"https://{request.host}/cdn/live/ABHotUpdates/"
+    ver_data["backup_cdn_url"] = f"https://{request.host}/cdn/live/ABHotUpdates/"
+    ver_data["abhotupdate_cdn_url"] = f"https://{request.host}/cdn/live/ABHotUpdates/"
+    
     return Response(
-        json.dumps(CUSTOM_VER_RESPONSE),
+        json.dumps(ver_data),
         status=200,
         content_type="application/json"
     )
@@ -877,12 +882,11 @@ if __name__ == "__main__":
     port = int(os.environ.get('PORT', 10000))
 
     print("\n" + "="*50)
-    print("  🔥 LEAKS BYPASS - VER.PHP PERSONALIZADO")
+    print("  🔥 LEAKS BYPASS - VER.PHP CORRIGIDO")
     print("="*50)
     print(f"  Porta: {port}")
     print(f"  Admin: /Po7eO")
     print(f"  Anti-Ban: ✅ COMPLETO")
-    print(f"  VER.PHP: ✅ PERSONALIZADO")
     print("="*50 + "\n")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
