@@ -399,7 +399,7 @@ def handle_cdn(path=""):
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/avatar/assetindexer").match(path) and os.path.exists(assetindexer_file):
+    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
         with open(assetindexer_file, "rb") as f:
             return Response(f.read(), status=200, content_type="application/octet-stream")
 
