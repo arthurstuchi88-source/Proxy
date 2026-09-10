@@ -12,6 +12,7 @@ import time
 from flask import Flask, request, Response, jsonify, session, redirect, url_for, render_template_string
 from datetime import datetime, timedelta
 from functools import wraps
+import socket
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32).hex()
@@ -25,9 +26,8 @@ PORT = int(os.environ.get('PORT', 10000))
 
 ADMIN_USER = "LEOMDZ"
 ADMIN_PASS = "OWNER"
-INTERFACE_ADMIN_USER = "thx"
-INTERFACE_ADMIN_PASS = "00"
 
+# Data file paths
 DATA_FILE = os.path.join(BASE_DIR, "crx_data.json")
 
 user_configs = {}
@@ -44,7 +44,6 @@ DEFAULT_CONFIG = {
     "ZIG_ZAG_MOVE": True
 }
 
-# ==================== ANTI-BAN COMPLETO ====================
 ANTI_BAN_OVERRIDES = {
     "CleanFFAntiState": {"var_type": "bool", "var_value": "true"},
     "FFAntihackDefenceLevel": {"var_type": "string", "var_value": "0"},
@@ -90,41 +89,7 @@ ANTI_BAN_OVERRIDES = {
     "OptionalDeepFileCheck": {"var_type": "bool", "var_value": "false"},
     "EnableFileCacherReadOpt": {"var_type": "bool", "var_value": "false"},
     "EnableFileCacherReadOpt_2022": {"var_type": "bool", "var_value": "false"},
-    "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"},
-    # Extra anti-ban
-    "DisableAHCode": {"var_type": "bool", "var_value": "true"},
-    "EnableAHCode": {"var_type": "bool", "var_value": "false"},
-    "EnableAntiCheat": {"var_type": "bool", "var_value": "false"},
-    "EnableAntiCheatV2": {"var_type": "bool", "var_value": "false"},
-    "DisableReport": {"var_type": "bool", "var_value": "true"},
-    "EnableReport": {"var_type": "bool", "var_value": "false"},
-    "DisableAntiCheat": {"var_type": "bool", "var_value": "true"},
-    "EnableCheatDetection": {"var_type": "bool", "var_value": "false"},
-    "DisableCheatDetection": {"var_type": "bool", "var_value": "true"},
-    "EnableHackerDetection": {"var_type": "bool", "var_value": "false"},
-    "DisableHackerDetection": {"var_type": "bool", "var_value": "true"},
-    "EnableAntiHack": {"var_type": "bool", "var_value": "false"},
-    "DisableAntiHack": {"var_type": "bool", "var_value": "true"},
-    "EnableVAC": {"var_type": "bool", "var_value": "false"},
-    "DisableVAC": {"var_type": "bool", "var_value": "true"},
-    "EnableEAC": {"var_type": "bool", "var_value": "false"},
-    "DisableEAC": {"var_type": "bool", "var_value": "true"},
-    "EnableBattlEye": {"var_type": "bool", "var_value": "false"},
-    "DisableBattlEye": {"var_type": "bool", "var_value": "true"},
-    "MemoryCheck": {"var_type": "bool", "var_value": "false"},
-    "MemoryScan": {"var_type": "bool", "var_value": "false"},
-    "MemoryProtection": {"var_type": "bool", "var_value": "false"},
-    "DisableMemoryCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableMemoryScan": {"var_type": "bool", "var_value": "true"},
-    "DisableMemoryProtection": {"var_type": "bool", "var_value": "true"},
-    "FileCheck": {"var_type": "bool", "var_value": "false"},
-    "FileScan": {"var_type": "bool", "var_value": "false"},
-    "DisableFileCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableFileScan": {"var_type": "bool", "var_value": "true"},
-    "ProcessCheck": {"var_type": "bool", "var_value": "false"},
-    "ProcessScan": {"var_type": "bool", "var_value": "false"},
-    "DisableProcessCheck": {"var_type": "bool", "var_value": "true"},
-    "DisableProcessScan": {"var_type": "bool", "var_value": "true"},
+    "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"}
 }
 
 BACKJUMPV1_OVERRIDES = {
@@ -158,6 +123,7 @@ def keep_alive():
     while True:
         try:
             requests.get(f"http://localhost:{PORT}/api/ping", timeout=5)
+            print(f"[{datetime.now()}] Keep-alive ping sent")
         except:
             pass
         time.sleep(240)
@@ -198,6 +164,7 @@ def load_data():
                     key_expiry[ip] = datetime.fromisoformat(exp_str)
                 except:
                     pass
+            print(f"Loaded data: {len(generated_keys)} keys, {len(registered_ips)} IPs")
         except Exception as e:
             print(f"Error loading data: {e}")
             user_configs = {}
@@ -205,13 +172,12 @@ def load_data():
             generated_keys = {}
             key_expiry = {}
     else:
+        print("No existing data file found. Starting fresh.")
         user_configs = {}
         registered_ips = {}
         generated_keys = {}
         key_expiry = {}
         save_data()
-
-load_data()
 
 # ========================================================
 
@@ -241,8 +207,8 @@ def generate_key(prefix="CRX-HACKS"):
 def get_overrides_for_ip(client_ip):
     config = get_user_config(client_ip)
     overrides = {}
-    # SEMPRE APLICA ANTI-BAN
-    overrides.update(ANTI_BAN_OVERRIDES)
+    if config.get("BYPASSV1", False):
+        overrides.update(ANTI_BAN_OVERRIDES)
     if config.get("BACKJUMPV1", False):
         overrides.update(BACKJUMPV1_OVERRIDES)
     if config.get("HIGH_SENSI", False):
@@ -288,28 +254,20 @@ def patch_fileinfo(original_text, config):
     return "\n".join(new_lines)
 
 def modify_ver_response(response_text, client_ip):
-    """Modifica o ver.php original para injetar anti-ban e mudar CDN"""
     try:
         data = json.loads(response_text)
-        
-        # Muda as URLs do CDN para o nosso servidor
         cdn_url = f"https://{request.host}/cdn/live/ABHotUpdates/"
         data["cdn_url"] = cdn_url
         data["backup_cdn_url"] = cdn_url
         data["abhotupdate_cdn_url"] = cdn_url
-        
-        # Adiciona as variáveis de anti-ban no gamevar
         overrides = get_overrides_for_ip(client_ip)
         if overrides:
             gamevar = data.get("gamevar", "")
             for var_name, override in overrides.items():
                 gamevar += f"\n{var_name},{var_name},{override['var_type']},{override['var_value']},,"
             data["gamevar"] = gamevar
-        
-        print(f"✅ VER.PHP modificado para {client_ip}")
         return json.dumps(data)
-    except Exception as e:
-        print(f"❌ Erro modify_ver_response: {e}")
+    except:
         return response_text
 
 # ==================== ROUTES ====================
@@ -319,8 +277,7 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '')
         password = request.form.get('password', '')
-        if ((username == ADMIN_USER and password == ADMIN_PASS) or
-                (username == INTERFACE_ADMIN_USER and password == INTERFACE_ADMIN_PASS)):
+        if username == ADMIN_USER and password == ADMIN_PASS:
             session['logged_in'] = True
             return redirect(url_for('admin_dashboard'))
         return render_template_string(LOGIN_PAGE, error="CREDENCIAIS INVÁLIDAS")
@@ -332,12 +289,7 @@ def admin_dashboard():
     return render_template_string(ADMIN_DASHBOARD,
                                  keys=generated_keys,
                                  ips=registered_ips,
-                                 key_expiry=key_expiry,
-                                 all_keys="\n".join(generated_keys.keys()))
-
-@app.route('/admin')
-def admin_index():
-    return redirect(url_for('admin_dashboard') if session.get('logged_in') else url_for('login'))
+                                 key_expiry=key_expiry)
 
 @app.route('/admin/generate', methods=['POST'])
 @login_required
@@ -379,11 +331,6 @@ def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
 
-@app.route('/logout')
-def user_logout_alias():
-    session.pop('unlocked', None)
-    return redirect(url_for('landing'))
-
 @app.route('/verify', methods=['POST'])
 def verify_key():
     client_ip = get_client_ip()
@@ -391,7 +338,6 @@ def verify_key():
     key = data.get('key', '').strip()
 
     if client_ip in registered_ips:
-        session['unlocked'] = True
         return jsonify({'success': True, 'message': 'JÁ REGISTRADO'})
 
     if key not in generated_keys:
@@ -405,7 +351,6 @@ def verify_key():
     key_data['used_ips'].append(client_ip)
     expiry_date = datetime.now() + timedelta(days=key_data['days'])
     key_expiry[client_ip] = expiry_date
-    session['unlocked'] = True
     save_data()
 
     return jsonify({
@@ -414,29 +359,19 @@ def verify_key():
         'expires': expiry_date.isoformat()
     })
 
-# ============ PROXY ROUTES ============
+# ============ PROXY ROUTES - NO KEY REQUIRED ============
 
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
-    """Baixa o ver.php original e injeta anti-ban"""
     client_ip = get_client_ip()
     params = dict(request.args)
-    headers = {k: v for k, v in request.headers.items() 
-               if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
-    
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
     try:
-        # Baixa o ver.php original com todos os parâmetros
         response = requests.get(VER_PHP_URL, params=params, headers=headers, timeout=60)
-        original_text = response.text
-        
-        # Modifica a resposta
-        modified = modify_ver_response(original_text, client_ip)
-        
-        print(f"✅ VER.PHP modificado para {client_ip}")
+        modified = modify_ver_response(response.text, client_ip)
         return Response(modified, status=200, content_type="application/json")
     except Exception as e:
-        print(f"❌ Erro ao baixar ver.php: {e}")
         return Response(f"Error: {e}", status=502)
 
 @app.route('/cdn/live/ABHotUpdates/', methods=['GET'])
@@ -448,25 +383,18 @@ def handle_cdn(path=""):
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    print(f"📥 CDN: {path} - {client_ip}")
-
-    # Asset Indexer
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/avatar/assetindexer").match(path) and os.path.exists(assetindexer_file):
+    if re.compile(r"android_astc/1\.130\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
         with open(assetindexer_file, "rb") as f:
             return Response(f.read(), status=200, content_type="application/octet-stream")
 
-    # Cache_res
     if "cache_res" in path:
         if config.get("HS_NECK", False) and os.path.exists(cache_file):
-            print(f"✅ HS_NECK - Servindo cache_res")
             with open(cache_file, "rb") as f:
                 return Response(f.read(), status=200, content_type="application/octet-stream")
         elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-            print(f"✅ HS_CHEST - Servindo cache_res2")
             with open(cache_res2_file, "rb") as f:
                 return Response(f.read(), status=200, content_type="application/octet-stream")
 
-    # Fileinfo
     if "fileinfo" in path:
         target_url = TARGET_BASE_URL + path
         try:
@@ -478,7 +406,6 @@ def handle_cdn(path=""):
         except Exception as e:
             return Response(f"Error: {e}", status=502)
 
-    # Proxy normal
     target_url = TARGET_BASE_URL + path
     try:
         resp = requests.get(target_url, timeout=60)
@@ -541,7 +468,7 @@ def api_ip_check():
 
 @app.route('/')
 def landing():
-    return render_template_string(KEY_PAGE)
+    return render_template_string(LANDING_PAGE)
 
 @app.route('/dashboard')
 def dashboard():
@@ -555,22 +482,458 @@ def unlock():
     return jsonify({'success': True})
 
 # ==================== HTML TEMPLATES ====================
-# (Mantenha os mesmos templates UI_CSS, LOGIN_PAGE, KEY_PAGE, ADMIN_DASHBOARD, DASHBOARD_PAGE)
-# Para economizar espaço, não vou reescrevê-los aqui, mas você deve mantê-los.
-# Eles são os mesmos do código anterior.
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEO MDZ · ADMINISTRADOR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#07070d;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:'Poppins','Segoe UI',sans-serif;overflow:hidden}
+        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
+        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.18;animation:float 14s ease-in-out infinite}
+        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
+        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
+        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
+        .container{position:relative;z-index:1;background:rgba(15,15,26,0.88);backdrop-filter:blur(28px);border-radius:28px;padding:48px 44px;width:100%;max-width:410px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.8)}
+        .brand{text-align:center;margin-bottom:36px}
+        .brand .icon{width:60px;height:60px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:18px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;margin-bottom:14px;box-shadow:0 12px 32px rgba(139,92,246,0.35)}
+        .brand h1{color:#fff;font-size:26px;font-weight:300;letter-spacing:6px;text-transform:uppercase}
+        .brand h1 span{color:#a78bfa;font-weight:700}
+        .brand p{color:rgba(255,255,255,0.18);font-size:10px;letter-spacing:3px;margin-top:6px;text-transform:uppercase}
+        .field{margin-bottom:18px}
+        .field label{display:block;color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;font-weight:600}
+        .field input{width:100%;padding:14px 18px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;color:#fff;font-size:15px;transition:0.3s;outline:none;font-family:inherit}
+        .field input:focus{border-color:rgba(139,92,246,0.5);background:rgba(139,92,246,0.05);box-shadow:0 0 0 4px rgba(139,92,246,0.08)}
+        .btn{width:100%;padding:16px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:600;letter-spacing:2px;cursor:pointer;transition:0.3s;font-family:inherit;text-transform:uppercase}
+        .btn:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(139,92,246,0.35)}
+        .error{color:#f87171;font-size:12px;text-align:center;margin-top:14px;padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;border:1px solid rgba(239,68,68,0.15);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+        .footer{text-align:center;margin-top:24px;color:rgba(255,255,255,0.08);font-size:9px;letter-spacing:3px;text-transform:uppercase}
+    </style>
+</head>
+<body>
+    <div class="aurora"><span></span><span></span></div>
+    <div class="container">
+        <div class="brand">
+            <div class="icon"><i class="fas fa-shield-halved"></i></div>
+            <h1>LEO <span>MDZ</span></h1>
+            <p>ACESSO ADMINISTRATIVO</p>
+        </div>
+        <form method="POST">
+            <div class="field"><label>USUÁRIO</label><input type="text" name="username" placeholder="DIGITE O USUÁRIO" required autocomplete="off"></div>
+            <div class="field"><label>SENHA</label><input type="password" name="password" placeholder="DIGITE A SENHA" required></div>
+            <button type="submit" class="btn">AUTENTICAR</button>
+            {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        </form>
+        <div class="footer">SEGURO</div>
+    </div>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</body>
+</html>"""
+
+ADMIN_DASHBOARD = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEO MDZ · ADMINISTRADOR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;color:#fff;padding:24px;min-height:100vh;position:relative}
+        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+        .aurora span{position:absolute;border-radius:50%;filter:blur(110px);opacity:.12;animation:float 16s ease-in-out infinite}
+        .aurora span:nth-child(1){width:500px;height:500px;background:#7c3aed;top:-160px;left:-140px}
+        .aurora span:nth-child(2){width:440px;height:440px;background:#ec4899;bottom:-160px;right:-120px;animation-delay:-8s}
+        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(50px,40px) scale(1.15)}}
+        .container{max-width:1200px;margin:0 auto;position:relative;z-index:1}
+        .header{display:flex;justify-content:space-between;align-items:center;padding:20px 0;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:32px}
+        .header h1{font-size:22px;font-weight:300;letter-spacing:4px;text-transform:uppercase}
+        .header h1 span{color:#a78bfa;font-weight:700}
+        .header a{color:rgba(255,255,255,0.4);text-decoration:none;padding:10px 22px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;transition:0.3s;font-size:13px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+        .header a:hover{background:rgba(255,255,255,0.05);color:#fff}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+        .card{background:rgba(15,15,26,0.85);backdrop-filter:blur(20px);border-radius:18px;padding:24px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 20px 50px rgba(0,0,0,0.4)}
+        .card h2{font-size:13px;font-weight:600;margin-bottom:18px;color:rgba(255,255,255,0.5);letter-spacing:2px;text-transform:uppercase}
+        .card h2 i{color:#a78bfa;margin-right:10px}
+        .field{margin-bottom:14px}
+        .field label{display:block;color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px;font-weight:600}
+        .field input{width:100%;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;color:#fff;font-size:14px;outline:none;transition:0.3s;font-family:inherit}
+        .field input:focus{border-color:rgba(139,92,246,0.5)}
+        .btn{padding:12px 24px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border:none;border-radius:10px;color:#fff;font-size:12px;font-weight:600;letter-spacing:1px;cursor:pointer;transition:0.3s;font-family:inherit;text-transform:uppercase}
+        .btn:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(139,92,246,0.3)}
+        .btn-danger{background:linear-gradient(135deg,#ef4444,#dc2626)}
+        .btn-danger:hover{box-shadow:0 8px 28px rgba(239,68,68,0.3)}
+        .btn-sm{padding:6px 14px;font-size:10px}
+        .table-wrap{overflow-x:auto;margin-top:8px}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        th{text-align:left;padding:10px 8px;color:rgba(255,255,255,0.3);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1px solid rgba(255,255,255,0.06)}
+        td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,0.03);color:rgba(255,255,255,0.6)}
+        .badge{padding:2px 10px;border-radius:6px;font-size:10px;font-weight:600;background:rgba(139,92,246,0.12);color:#a78bfa;font-family:monospace}
+        .badge.active{background:rgba(52,211,153,0.12);color:#34d399}
+        .badge.expired{background:rgba(239,68,68,0.12);color:#f87171}
+        .full{grid-column:1/-1}
+        .stat{text-align:center;background:rgba(255,255,255,0.02);padding:20px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.04)}
+        .stat .label{color:rgba(255,255,255,0.3);font-size:9px;text-transform:uppercase;letter-spacing:1.5px;font-weight:600}
+        .stat .value{font-size:30px;font-weight:700;margin-top:6px}
+        @media(max-width:768px){.grid{grid-template-columns:1fr}.header{flex-direction:column;gap:12px}}
+    </style>
+</head>
+<body>
+    <div class="aurora"><span></span><span></span></div>
+    <div class="container">
+        <div class="header">
+            <h1>LEO <span>MDZ</span> · ADMINISTRAÇÃO</h1>
+            <a href="/admin/logout"><i class="fas fa-sign-out-alt"></i> SAIR</a>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h2><i class="fas fa-key"></i> GERAR KEY</h2>
+                <div class="field"><label>PREFIXO DA KEY</label><input type="text" id="keyPrefix" value="CRX-HACKS"></div>
+                <div class="field"><label>LIMITE DE IPs</label><input type="number" id="ipLimit" value="1" min="1"></div>
+                <div class="field"><label>VALIDADE (DIAS)</label><input type="number" id="keyDays" value="7" min="1"></div>
+                <button class="btn" onclick="generateKey()"><i class="fas fa-plus"></i> GERAR</button>
+                <div id="generatedKey" style="margin-top:14px;font-family:monospace;color:#a78bfa;font-size:16px;font-weight:600;"></div>
+            </div>
+            <div class="card">
+                <h2><i class="fas fa-chart-line"></i> ESTATÍSTICAS</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
+                    <div class="stat">
+                        <div class="label">TOTAL DE KEYS</div>
+                        <div class="value" style="color:#a78bfa;">{{ keys|length }}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="label">IPS ATIVOS</div>
+                        <div class="value" style="color:#34d399;">{{ ips|length }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card full" style="margin-top:24px;">
+            <h2><i class="fas fa-list"></i> KEYS</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>KEY</th><th>PREFIXO</th><th>LIMITE</th><th>USOS</th><th>DIAS</th><th>CRIADA</th><th>AÇÃO</th></tr></thead>
+                    <tbody>
+                        {% for key, data in keys.items() %}
+                        <tr><td><span class="badge">{{ key }}</span></td><td>{{ data.prefix }}</td><td>{{ data.limit }}</td><td>{{ data.used_ips|length }}</td><td>{{ data.days }}</td><td>{{ data.created[:10] }}</td><td><button class="btn btn-danger btn-sm" onclick="revokeKey('{{ key }}')">REVOGAR</button></td></tr>
+                        {% else %}
+                        <tr><td colspan="7" style="text-align:center;padding:30px;color:rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:1px;">NENHUMA KEY GERADA</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card full" style="margin-top:24px;">
+            <h2><i class="fas fa-users"></i> IPS REGISTRADOS</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ENDEREÇO IP</th><th>KEY</th><th>EXPIRA</th><th>STATUS</th></tr></thead>
+                    <tbody>
+                        {% for ip, key in ips.items() %}
+                        <tr><td>{{ ip }}</td><td><span class="badge">{{ key }}</span></td><td>{% if key_expiry[ip] %}{{ key_expiry[ip].strftime('%d/%m/%Y') }}{% else %}-{% endif %}</td><td><span class="badge active">ATIVO</span></td></tr>
+                        {% else %}
+                        <tr><td colspan="4" style="text-align:center;padding:30px;color:rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:1px;">NENHUM IP REGISTRADO</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script>
+        function generateKey(){const prefix=document.getElementById('keyPrefix').value||'CRX-HACKS';const limit=parseInt(document.getElementById('ipLimit').value)||1;const days=parseInt(document.getElementById('keyDays').value)||7;fetch('/admin/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix,limit,days})}).then(r=>r.json()).then(d=>{document.getElementById('generatedKey').textContent='✓ '+d.key;setTimeout(()=>location.reload(),1200);});}
+        function revokeKey(key){if(!confirm('REVOGAR '+key+'?'))return;fetch('/admin/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}).then(r=>r.json()).then(d=>{if(d.success)location.reload();});}
+    </script>
+</body>
+</html>"""
+
+LANDING_PAGE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEO MDZ · DESBLOQUEAR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;position:relative;overflow:hidden}
+        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
+        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16;animation:float 14s ease-in-out infinite}
+        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
+        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
+        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
+        .container{max-width:400px;width:100%;background:rgba(15,15,26,0.88);backdrop-filter:blur(32px);border-radius:28px;padding:44px 36px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.9);position:relative;z-index:1}
+        .brand{text-align:center;margin-bottom:32px}
+        .brand .icon{width:56px;height:56px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;margin-bottom:12px;box-shadow:0 12px 32px rgba(139,92,246,0.35)}
+        .brand h1{color:#fff;font-size:22px;font-weight:300;letter-spacing:4px;text-transform:uppercase}
+        .brand h1 span{color:#a78bfa;font-weight:700}
+        .brand p{color:rgba(255,255,255,0.15);font-size:9px;letter-spacing:3px;margin-top:4px;text-transform:uppercase}
+        .step-status{display:flex;justify-content:center;gap:30px;margin:10px 0 20px 0;font-size:11px;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:600;letter-spacing:1px}
+        .step-status .done{color:#34d399}
+        .social-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:14px;border:none;border-radius:12px;color:#fff;font-size:13px;font-weight:600;text-decoration:none;transition:0.3s;margin:6px 0;font-family:inherit;text-transform:uppercase;letter-spacing:1px}
+        .social-btn.youtube{background:linear-gradient(135deg,#ff0000,#cc0000)}
+        .social-btn.youtube:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(255,0,0,0.35)}
+        .social-btn.telegram{background:linear-gradient(135deg,#0088cc,#006699)}
+        .social-btn.telegram:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,136,204,0.35)}
+        .note{text-align:center;color:rgba(255,255,255,0.25);font-size:10px;margin:8px 0 14px 0;letter-spacing:0.5px;text-transform:uppercase;font-weight:500}
+        .unlock-btn{width:100%;padding:16px;background:linear-gradient(135deg,#34d399,#22d3ee);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:0.3s;margin-top:4px;font-family:inherit;text-transform:uppercase}
+        .unlock-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 28px rgba(52,211,153,0.35)}
+        .unlock-btn:disabled{opacity:0.3;cursor:not-allowed;transform:none}
+        .footer{text-align:center;margin-top:24px;color:rgba(255,255,255,0.08);font-size:8px;letter-spacing:3px;text-transform:uppercase}
+    </style>
+</head>
+<body>
+    <div class="aurora"><span></span><span></span></div>
+    <div class="container">
+        <div class="brand">
+            <div class="icon"><i class="fas fa-unlock-alt"></i></div>
+            <h1>LEO <span>MDZ</span></h1>
+            <p>CRIADOR @LEO MODZ</p>
+        </div>
+        <div class="step-status">
+            <span id="ytStatus"><i class="fab fa-youtube"></i> YOUTUBE</span>
+            <span id="tgStatus"><i class="fab fa-telegram"></i> TELEGRAM</span>
+        </div>
+        <a href="https://youtube.com/@leomodzofc1?si=iOWwXPqx455mXrb_" target="_blank" class="social-btn youtube" onclick="markYouTube()">
+            <i class="fab fa-youtube"></i> INSCREVA-SE PARA CONTINUAR
+        </a>
+        <a href="https://t.me/LEOMDZALLSRCLEAKISBACK" target="_blank" class="social-btn telegram" onclick="markTelegram()">
+            <i class="fab fa-telegram-plane"></i> ENTRE NO TG PARA CONTINUAR
+        </a>
+        <div class="note">INSCREVA-SE E ENTRE NO TG PARA CONTINUAR.</div>
+        <button class="unlock-btn" id="unlockBtn" disabled onclick="unlockProxy()">
+            <i class="fas fa-arrow-right"></i> TOQUE PARA CONTINUAR
+        </button>
+        <div class="footer">SEGURO</div>
+    </div>
+    <script>
+        let ytClicked=false;let tgClicked=false;
+        function markYouTube(){ytClicked=true;document.getElementById('ytStatus').className='done';document.getElementById('ytStatus').innerHTML='<i class="fab fa-youtube"></i> ✓ YOUTUBE';checkUnlock();}
+        function markTelegram(){tgClicked=true;document.getElementById('tgStatus').className='done';document.getElementById('tgStatus').innerHTML='<i class="fab fa-telegram"></i> ✓ TELEGRAM';checkUnlock();}
+        function checkUnlock(){if(ytClicked&&tgClicked){document.getElementById('unlockBtn').disabled=false;}}
+        function unlockProxy(){if(!ytClicked||!tgClicked)return;fetch('/unlock',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.success){window.location.href='/dashboard';}});}
+    </script>
+</body>
+</html>"""
+
+DASHBOARD_PAGE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEO MDZ · PROXY</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#07070d;font-family:'Poppins','Segoe UI',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;position:relative;overflow:hidden}
+        .aurora{position:fixed;inset:0;z-index:0;overflow:hidden}
+        .aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16;animation:float 14s ease-in-out infinite}
+        .aurora span:nth-child(1){width:420px;height:420px;background:#7c3aed;top:-120px;left:-100px}
+        .aurora span:nth-child(2){width:380px;height:380px;background:#ec4899;bottom:-120px;right:-80px;animation-delay:-7s}
+        @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.15)}}
+        .dashboard{max-width:420px;width:100%;background:rgba(15,15,26,0.88);backdrop-filter:blur(32px);border-radius:28px;padding:28px 24px;border:1px solid rgba(255,255,255,0.07);box-shadow:0 48px 96px rgba(0,0,0,0.9);position:relative;z-index:1}
+        .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+        .brand{display:flex;align-items:center;gap:12px}
+        .brand-icon{width:40px;height:40px;background:linear-gradient(135deg,#8b5cf6,#ec4899);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;box-shadow:0 8px 24px rgba(139,92,246,0.35)}
+        .brand-text{color:#fff;font-size:18px;font-weight:700;letter-spacing:-0.5px;text-transform:uppercase}
+        .brand-text span{background:linear-gradient(135deg,#8b5cf6,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .status-badge{display:flex;align-items:center;gap:6px;padding:4px 14px;border-radius:12px;border:1px solid rgba(52,211,153,0.15);background:rgba(52,211,153,0.06)}
+        .status-dot{width:6px;height:6px;border-radius:50%;background:#34d399;animation:pulse 2s infinite}
+        .status-text{color:#34d399;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+        .ip-bar{background:rgba(255,255,255,0.03);border-radius:14px;padding:10px 14px;margin:10px 0 14px 0;display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,0.05)}
+        .ip-bar i{color:#a78bfa;font-size:12px;opacity:0.5}
+        .ip-bar .ip{color:rgba(255,255,255,0.45);font-size:12px;font-family:monospace;flex:1}
+        .ip-bar .tag{font-size:8px;padding:2px 12px;border-radius:6px;background:rgba(139,92,246,0.12);color:#a78bfa;font-weight:600;letter-spacing:0.5px;text-transform:uppercase}
+        .section{color:rgba(255,255,255,0.3);font-size:8px;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin:16px 0 8px 0}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+        .item{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:0.3s}
+        .item:hover{background:rgba(255,255,255,0.04);border-color:rgba(139,92,246,0.2)}
+        .item .ico{font-size:14px;width:24px;text-align:center;opacity:0.5}
+        .item .info{flex:1}
+        .item .name{color:rgba(255,255,255,0.6);font-size:11px;font-weight:600;text-transform:uppercase}
+        .item .desc{color:rgba(255,255,255,0.15);font-size:7px;text-transform:uppercase;letter-spacing:0.5px}
+        .sw{width:32px;height:17px;background:rgba(255,255,255,0.05);border-radius:10px;cursor:pointer;position:relative;transition:0.3s;flex-shrink:0;border:1px solid rgba(255,255,255,0.04)}
+        .sw .th{width:13px;height:13px;background:rgba(255,255,255,0.1);border-radius:50%;position:absolute;top:1px;left:1px;transition:0.3s}
+        .sw.on{background:linear-gradient(135deg,#8b5cf6,#ec4899);border-color:transparent}
+        .sw.on .th{left:16px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+        .note-box{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);border-radius:12px;padding:12px 14px;margin-top:12px;color:rgba(255,255,255,0.35);font-size:11px;text-align:center;line-height:1.5;text-transform:uppercase;font-weight:500}
+        .note-box a{color:#a78bfa;text-decoration:none;word-break:break-all}
+        .note-box a:hover{text-decoration:underline}
+        .footer{text-align:center;margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.04)}
+        .footer-text{color:rgba(255,255,255,0.15);font-size:8px;letter-spacing:3px;font-weight:700;text-transform:uppercase}
+        .footer-text span{background:linear-gradient(135deg,#8b5cf6,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .social-footer{display:flex;gap:12px;justify-content:center;margin-top:8px}
+        .social-footer a{color:rgba(255,255,255,0.1);font-size:20px;transition:0.3s}
+        .social-footer a:hover{color:rgba(255,255,255,0.35)}
+        .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(15,15,26,0.96);border:1px solid rgba(139,92,246,0.15);border-radius:12px;padding:10px 20px;color:#fff;font-size:11px;font-weight:600;backdrop-filter:blur(20px);opacity:0;transition:opacity 0.3s;pointer-events:none;max-width:90%;z-index:999;text-transform:uppercase;letter-spacing:1px}
+        .toast.show{opacity:1}
+        @media(max-width:380px){.grid{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <div class="aurora"><span></span><span></span></div>
+    <div class="dashboard">
+        <div class="header">
+            <div class="brand">
+                <div class="brand-icon"><i class="fas fa-satellite-dish"></i></div>
+                <div class="brand-text">LEO <span>MDZ</span></div>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <div class="status-text">AO VIVO</div>
+            </div>
+        </div>
+        <div class="ip-bar">
+            <i class="fas fa-network-wired"></i>
+            <span class="ip" id="ipDisplay">CARREGANDO...</span>
+            <span class="tag"><i class="fas fa-check-circle"></i> DESBLOQUEADO</span>
+        </div>
+
+        <div class="section"><i class="fas fa-crosshairs"></i> MIRA</div>
+        <div class="grid">
+            <div class="item" onclick="toggle('hs_neck')">
+                <div class="ico" style="color:#a78bfa;"><i class="fas fa-crosshairs"></i></div>
+                <div class="info"><div class="name">HS PESCOÇO</div><div class="desc">HEADSHOT</div></div>
+                <div class="sw" id="sw_hs_neck"><div class="th"></div></div>
+            </div>
+            <div class="item" onclick="toggle('hs_chest')">
+                <div class="ico" style="color:#f472b6;"><i class="fas fa-bullseye"></i></div>
+                <div class="info"><div class="name">HS PEITO</div><div class="desc">PEITO</div></div>
+                <div class="sw" id="sw_hs_chest"><div class="th"></div></div>
+            </div>
+        </div>
+
+        <div class="section"><i class="fas fa-sliders-h"></i> CONFIGURAÇÃO</div>
+        <div class="grid">
+            <div class="item" onclick="toggle('backjump_v1')">
+                <div class="ico" style="color:#f87171;"><i class="fas fa-arrow-up"></i></div>
+                <div class="info"><div class="name">BACKJUMP</div><div class="desc">PULO</div></div>
+                <div class="sw" id="sw_backjump_v1"><div class="th"></div></div>
+            </div>
+            <div class="item" onclick="toggle('high_sensi')">
+                <div class="ico" style="color:#f472b6;"><i class="fas fa-sliders-h"></i></div>
+                <div class="info"><div class="name">SENSI ALTA</div><div class="desc">SENSIBILIDADE</div></div>
+                <div class="sw" id="sw_high_sensi"><div class="th"></div></div>
+            </div>
+        </div>
+
+        <div class="section"><i class="fas fa-running"></i> MOVIMENTO</div>
+        <div class="grid">
+            <div class="item" onclick="toggle('zig_zag_move')">
+                <div class="ico" style="color:#34d399;"><i class="fas fa-random"></i></div>
+                <div class="info"><div class="name">ZIG ZAG</div><div class="desc">MOVIMENTO</div></div>
+                <div class="sw" id="sw_zig_zag_move"><div class="th"></div></div>
+            </div>
+        </div>
+
+        <div class="note-box">
+            <i class="fas fa-info-circle" style="color:#a78bfa;margin-right:6px;"></i>
+            SE O JOGO NÃO ABRIR, COPIE E COLE/ABRA O LINK ACIMA NO CHROME<br>
+            <a href="https://leomdzproxy-production.up.railway.app" target="_blank">https://leomdzproxy-production.up.railway.app</a>
+        </div>
+
+        <div class="social-footer">
+            <a href="https://youtube.com/@leomodzofc1?si=iOWwXPqx455mXrb_" target="_blank"><i class="fab fa-youtube"></i></a>
+            <a href="https://t.me/LEOMDZALLSRCLEAKISBACK" target="_blank"><i class="fab fa-telegram"></i></a>
+        </div>
+
+        <div class="footer"><div class="footer-text"><span>LEO MDZ</span> · PROXY</div></div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script>
+        const nomes = {
+            'hs_neck': 'HS PESCOÇO',
+            'hs_chest': 'HS PEITO',
+            'backjump_v1': 'BACKJUMP',
+            'high_sensi': 'SENSI ALTA',
+            'zig_zag_move': 'ZIG ZAG'
+        };
+        function toast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast show';
+            clearTimeout(t._h);
+            t._h = setTimeout(() => t.className = 'toast', 1800);
+        }
+
+        fetch('/api/ip/check').then(r=>r.json()).then(d=>{
+            document.getElementById('ipDisplay').textContent = d.ip || 'DESCONHECIDO';
+        });
+
+        // Carregar configuração atual
+        fetch('/api/status').then(r=>r.json()).then(d=>{
+            const c = d.config;
+            document.getElementById('sw_hs_neck').className = 'sw' + (c.HS_NECK ? ' on' : '');
+            document.getElementById('sw_hs_chest').className = 'sw' + (c.HS_CHEST ? ' on' : '');
+            document.getElementById('sw_backjump_v1').className = 'sw' + (c.BACKJUMPV1 ? ' on' : '');
+            document.getElementById('sw_high_sensi').className = 'sw' + (c.HIGH_SENSI ? ' on' : '');
+            document.getElementById('sw_zig_zag_move').className = 'sw' + (c.ZIG_ZAG_MOVE ? ' on' : '');
+        });
+
+        function toggle(feature) {
+            const el = document.getElementById('sw_' + feature);
+            const on = el.classList.contains('on');
+            const val = !on;
+
+            // Atualiza a interface imediatamente
+            el.className = 'sw' + (val ? ' on' : '');
+
+            fetch('/api/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({feature: feature, value: val})
+            }).then(r=>r.json()).then(d=>{
+                if(d.success) {
+                    toast(nomes[feature] + ' ' + (val ? 'LIGADO' : 'DESLIGADO'));
+                } else {
+                    // Reverte em caso de erro
+                    el.className = 'sw' + (!val ? ' on' : '');
+                    toast('ERRO AO ALTERAR ' + nomes[feature]);
+                }
+            }).catch(err => {
+                // Reverte em caso de erro
+                el.className = 'sw' + (!val ? ' on' : '');
+                toast('ERRO AO ALTERAR ' + nomes[feature]);
+            });
+        }
+    </script>
+</body>
+</html>"""
 
 # ==================== MAIN ====================
+def get_public_ip():
+    try:
+        response = requests.get('https://api.ipify.org', timeout=5)
+        return response.text.strip()
+    except:
+        try:
+            response = requests.get('https://icanhazip.com', timeout=5)
+            return response.text.strip()
+        except:
+            return "Não foi possível obter o IP público"
+
 if __name__ == "__main__":
     load_data()
     port = int(os.environ.get('PORT', 10000))
 
     print("\n" + "="*50)
-    print("  🔥 LEAKS BYPASS - VER.PHP ORIGINAL MODIFICADO")
+    print("  LEO MDZ PROXY INTERCEPTOR")
     print("="*50)
-    print(f"  Porta: {port}")
-    print(f"  Admin: /Po7eO")
-    print(f"  Anti-Ban: ✅ ATIVO")
-    print(f"  VER.PHP: ✅ ORIGINAL + INJEÇÃO")
+    print(f"  Porta do servidor: {port}")
+    print(f"  URL pública: https://leomdzproxy-production.up.railway.app")
+    print(f"  Admin     : /Po7eO")
+    print(f"  Status    : Rodando")
     print("="*50 + "\n")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
