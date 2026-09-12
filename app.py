@@ -213,7 +213,7 @@ def patch_fileinfo(original_text, config):
                     with open(cache_res_file, "rb") as f:
                         gz_data = f.read()
                     raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
+                    new_line = f"cache_res.~2BrPJlgpDAnfyUCp~2Biox5bwsZlQQ~3D"
                     new_lines.append(new_line)
                 except:
                     new_lines.append(line)
