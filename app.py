@@ -39,12 +39,12 @@ generated_keys = {}
 key_expiry = {}
 
 DEFAULT_CONFIG = {
-    "HS_NECK": False,
+    "HS_NECK": True,
     "HS_CHEST": False,
-    "BYPASSV1": True,
-    "BACKJUMPV1": True,
-    "HIGH_SENSI": True,
-    "ZIG_ZAG_MOVE": True
+    "BYPASSV1": False,
+    "BACKJUMPV1": False,
+    "HIGH_SENSI": False,
+    "ZIG_ZAG_MOVE": False
 }
 
 ANTI_BAN_OVERRIDES = {
@@ -95,31 +95,7 @@ ANTI_BAN_OVERRIDES = {
     "EnableGGPDecryptFailureProtection": {"var_type": "bool", "var_value": "false"}
 }
 
-BACKJUMPV1_OVERRIDES = {
-    "EnableAccelerationOnFalling": {"var_type": "bool", "var_value": "false"},
-    "CanJumpFallingRunFast": {"var_type": "bool", "var_value": "false"},
-    "CanCreepRunFast": {"var_type": "bool", "var_value": "false"},
-    "CanCrouchingRunFast": {"var_type": "bool", "var_value": "false"},
-    "StropFallingResetSpeed": {"var_type": "bool", "var_value": "true"}
-}
 
-HIGH_SENSI_OVERRIDES = {
-    "SensitivityMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "Sensitivity1PMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X1ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X2ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X4ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "X8ScopeMaxSetting": {"var_type": "float", "var_value": "9.0"},
-    "FreeLookMaxSetting": {"var_type": "float", "var_value": "9.0"}
-}
-
-ZIG_ZAG_MOVE_OVERRIDES = {
-    "FreeMoveAngularSpeed": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedStand": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedCrouch": {"var_type": "float", "var_value": "9999.0"},
-    "FreeMoveAngularSpeedCreep": {"var_type": "float", "var_value": "9999.0"},
-    "ResetRotationSpeed": {"var_type": "float", "var_value": "9999.0"},
-}
 
 # ==================== KEEP ALIVE ====================
 def keep_alive():
