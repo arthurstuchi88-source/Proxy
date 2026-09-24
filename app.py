@@ -38,10 +38,10 @@ key_expiry = {}
 DEFAULT_CONFIG = {
     "HS_NECK": True,
     "HS_CHEST": False,
-    "BYPASSV1": False,
-    "BACKJUMPV1": False,
-    "HIGH_SENSI": False,
-    "ZIG_ZAG_MOVE": False
+    "BYPASSV1": True,
+    "BACKJUMPV1": True,
+    "HIGH_SENSI": True,
+    "ZIG_ZAG_MOVE": True
 }
 
 ANTI_BAN_OVERRIDES = {
@@ -496,42 +496,105 @@ def handle_ver_php():
 
 @app.route('/cdn/live/ABHotUpdates/', methods=['GET'])
 @app.route('/cdn/live/ABHotUpdates/<path:path>', methods=['GET'])
+def proxy_stream(url, extra_headers=None):
+    """Stream um arquivo do CDN original direto pro cliente, com Content-Length correto."""
+    try:
+        fwd_headers = {
+            "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)",
+            "Accept": "*/*",
+        }
+        if extra_headers:
+            fwd_headers.update(extra_headers)
+
+        resp = requests.get(url, headers=fwd_headers, timeout=120, stream=True)
+        resp.raise_for_status()
+
+        content_length = resp.headers.get("Content-Length")
+        content_type   = resp.headers.get("Content-Type", "application/octet-stream")
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=65536):
+                if chunk:
+                    yield chunk
+
+        response_headers = {"Content-Type": content_type}
+        if content_length:
+            response_headers["Content-Length"] = content_length
+        # Espelha ETag/Last-Modified para o jogo validar o arquivo
+        for h in ("ETag", "Last-Modified", "Accept-Ranges"):
+            if h in resp.headers:
+                response_headers[h] = resp.headers[h]
+
+        return Response(generate(), status=resp.status_code, headers=response_headers, direct_passthrough=True)
+    except Exception as e:
+        print(f"[CDN STREAM ERROR] {url} -> {e}")
+        return Response(f"Error: {e}", status=502)
+
+def serve_local_file(path):
+    """Serve um arquivo local com Content-Length correto."""
+    size = os.path.getsize(path)
+    def generate():
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+    return Response(
+        generate(),
+        status=200,
+        headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(size),
+        },
+        direct_passthrough=True
+    )
+
 def handle_cdn(path=""):
     client_ip = get_client_ip()
     config = get_user_config(client_ip)
-    cache_file = os.path.join(BASE_DIR, "cache_res")
-    cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
+    cache_file        = os.path.join(BASE_DIR, "cache_res")
+    cache_res2_file   = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
+    # cache_res3 (assetindexer) tem prioridade
     if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
-        with open(assetindexer_file, "rb") as f:
-            return Response(f.read(), status=200, content_type="application/octet-stream")
+        return serve_local_file(assetindexer_file)
 
+    # cache_res — serve arquivo local (headshot) ou faz proxy streaming
     if "cache_res" in path:
         if config.get("HS_NECK", False) and os.path.exists(cache_file):
-            with open(cache_file, "rb") as f:
-                return Response(f.read(), status=200, content_type="application/octet-stream")
+            return serve_local_file(cache_file)
         elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-            with open(cache_res2_file, "rb") as f:
-                return Response(f.read(), status=200, content_type="application/octet-stream")
+            return serve_local_file(cache_res2_file)
+        # Se nenhum HS ativo, deixa passar pro CDN original via stream
+        return proxy_stream(TARGET_BASE_URL + path)
 
+    # fileinfo — patch do sha1/tamanho se HS ativo, senão stream direto
     if "fileinfo" in path:
         target_url = TARGET_BASE_URL + path
         try:
-            resp = requests.get(target_url, timeout=60)
+            resp = requests.get(target_url, headers={
+                "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)"
+            }, timeout=120)
+            resp.raise_for_status()
             if config.get("HS_NECK", False) or config.get("HS_CHEST", False):
                 patched = patch_fileinfo(resp.text, config)
-                return Response(patched.encode(), status=200, content_type="binary/octet-stream")
-            return Response(resp.content, status=200, content_type="binary/octet-stream")
+                data = patched.encode()
+                return Response(data, status=200, headers={
+                    "Content-Type": "binary/octet-stream",
+                    "Content-Length": str(len(data)),
+                })
+            return Response(resp.content, status=200, headers={
+                "Content-Type": "binary/octet-stream",
+                "Content-Length": str(len(resp.content)),
+            })
         except Exception as e:
+            print(f"[FILEINFO ERROR] {e}")
             return Response(f"Error: {e}", status=502)
 
-    target_url = TARGET_BASE_URL + path
-    try:
-        resp = requests.get(target_url, timeout=60)
-        return Response(resp.content, status=resp.status_code, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-    except Exception as e:
-        return Response(f"Error: {e}", status=502)
+    # Qualquer outro arquivo CDN — stream direto com timeout longo
+    return proxy_stream(TARGET_BASE_URL + path)
 
 # ============ API ROUTES ============
 
