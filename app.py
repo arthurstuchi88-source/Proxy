@@ -38,10 +38,10 @@ key_expiry = {}
 DEFAULT_CONFIG = {
     "HS_NECK": True,
     "HS_CHEST": False,
-    "BYPASSV1": True,
-    "BACKJUMPV1": True,
-    "HIGH_SENSI": True,
-    "ZIG_ZAG_MOVE": True
+    "BYPASSV1": False,
+    "BACKJUMPV1": False,
+    "HIGH_SENSI": False,
+    "ZIG_ZAG_MOVE": False
 }
 
 ANTI_BAN_OVERRIDES = {
@@ -560,8 +560,8 @@ def handle_cdn(path=""):
     cache_res2_file   = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    # cache_res3 (assetindexer) tem prioridade
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
+    # cache_res3 (assetindexer) tem prioridade — regex genérico, funciona em qualquer versão
+    if re.compile(r"android_astc/[\d.]+/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
         return serve_local_file(assetindexer_file)
 
     # cache_res — serve arquivo local (headshot) ou faz proxy streaming
