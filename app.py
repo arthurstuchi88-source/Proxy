@@ -501,7 +501,7 @@ def cdn_route(path=""):
 
 
 def proxy_stream(url, extra_headers=None):
-    """Stream um arquivo do CDN original direto pro cliente, com Content-Length correto."""
+    """Baixa arquivo do CDN original em memória e entrega pro cliente com Content-Length exato."""
     try:
         fwd_headers = {
             "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)",
@@ -510,26 +510,30 @@ def proxy_stream(url, extra_headers=None):
         if extra_headers:
             fwd_headers.update(extra_headers)
 
-        resp = requests.get(url, headers=fwd_headers, timeout=120, stream=True)
+        resp = requests.get(
+            url,
+            headers=fwd_headers,
+            timeout=(10, 300),  # (connect, read) — até 5min pra baixar o body completo
+            stream=True
+        )
         resp.raise_for_status()
 
-        content_length = resp.headers.get("Content-Length")
-        content_type   = resp.headers.get("Content-Type", "application/octet-stream")
+        content_type = resp.headers.get("Content-Type", "application/octet-stream")
 
-        def generate():
-            for chunk in resp.iter_content(chunk_size=65536):
-                if chunk:
-                    yield chunk
+        # Baixa tudo em memória antes de responder — garante Content-Length exato
+        # e elimina risco de conexão upstream cair no meio do stream pro cliente
+        data = b"".join(resp.iter_content(chunk_size=65536))
 
-        response_headers = {"Content-Type": content_type}
-        if content_length:
-            response_headers["Content-Length"] = content_length
-        # Espelha ETag/Last-Modified para o jogo validar o arquivo
-        for h in ("ETag", "Last-Modified", "Accept-Ranges"):
+        response_headers = {
+            "Content-Type": content_type,
+            "Content-Length": str(len(data)),
+            "Accept-Ranges": "bytes",
+        }
+        for h in ("ETag", "Last-Modified"):
             if h in resp.headers:
                 response_headers[h] = resp.headers[h]
 
-        return Response(generate(), status=resp.status_code, headers=response_headers, direct_passthrough=True)
+        return Response(data, status=200, headers=response_headers)
     except Exception as e:
         print(f"[CDN STREAM ERROR] {url} -> {e}")
         return Response(f"Error: {e}", status=502)
