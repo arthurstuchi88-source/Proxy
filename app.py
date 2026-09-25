@@ -496,6 +496,10 @@ def handle_ver_php():
 
 @app.route('/cdn/live/ABHotUpdates/', methods=['GET'])
 @app.route('/cdn/live/ABHotUpdates/<path:path>', methods=['GET'])
+def cdn_route(path=""):
+    return handle_cdn(path)
+
+
 def proxy_stream(url, extra_headers=None):
     """Stream um arquivo do CDN original direto pro cliente, com Content-Length correto."""
     try:
