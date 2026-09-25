@@ -539,23 +539,18 @@ def proxy_stream(url, extra_headers=None):
         return Response(f"Error: {e}", status=502)
 
 def serve_local_file(path):
-    """Serve um arquivo local com Content-Length correto."""
-    size = os.path.getsize(path)
-    def generate():
-        with open(path, "rb") as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk:
-                    break
-                yield chunk
+    """Serve um arquivo local carregando tudo em memória — garante Content-Length exato e evita
+    truncamento silencioso que o Railway/gunicorn causa com direct_passthrough=True em streaming."""
+    with open(path, "rb") as f:
+        data = f.read()
     return Response(
-        generate(),
+        data,
         status=200,
         headers={
             "Content-Type": "application/octet-stream",
-            "Content-Length": str(size),
-        },
-        direct_passthrough=True
+            "Content-Length": str(len(data)),
+            "Accept-Ranges": "bytes",
+        }
     )
 
 def handle_cdn(path=""):
@@ -581,25 +576,32 @@ def handle_cdn(path=""):
     # fileinfo — patch do sha1/tamanho se HS ativo, senão stream direto
     if "fileinfo" in path:
         target_url = TARGET_BASE_URL + path
-        try:
-            resp = requests.get(target_url, headers={
-                "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)"
-            }, timeout=120)
-            resp.raise_for_status()
-            if config.get("HS_NECK", False) or config.get("HS_CHEST", False):
-                patched = patch_fileinfo(resp.text, config)
-                data = patched.encode()
-                return Response(data, status=200, headers={
-                    "Content-Type": "binary/octet-stream",
-                    "Content-Length": str(len(data)),
-                })
-            return Response(resp.content, status=200, headers={
-                "Content-Type": "binary/octet-stream",
-                "Content-Length": str(len(resp.content)),
-            })
-        except Exception as e:
-            print(f"[FILEINFO ERROR] {e}")
-            return Response(f"Error: {e}", status=502)
+        resp = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp = requests.get(target_url, headers={
+                    "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)"
+                }, timeout=25)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[FILEINFO] tentativa {attempt+1}/3 falhou: {e}")
+                if attempt < 2:
+                    time.sleep(1)
+        if resp is None:
+            print(f"[FILEINFO ERROR] todas tentativas falharam: {last_err}")
+            return Response(f"Error: {last_err}", status=502)
+        if config.get("HS_NECK", False) or config.get("HS_CHEST", False):
+            patched = patch_fileinfo(resp.text, config)
+            body = patched.encode()
+        else:
+            body = resp.content
+        return Response(body, status=200, headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(body)),
+        })
 
     # Qualquer outro arquivo CDN — stream direto com timeout longo
     return proxy_stream(TARGET_BASE_URL + path)
