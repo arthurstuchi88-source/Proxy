@@ -36,7 +36,7 @@ generated_keys = {}
 key_expiry = {}
 
 DEFAULT_CONFIG = {
-    "HS_NECK": True,
+    "HS_NECK": False,
     "HS_CHEST": False,
     "BYPASSV1": False,
     "BACKJUMPV1": False,
