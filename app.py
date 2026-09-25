@@ -602,7 +602,7 @@ def handle_cdn(path=""):
 
     # cache_res3 (assetindexer) tem prioridade
     # Usa search() em vez de match() — path pode vir com barra inicial ou prefixo extra
-    if re.search(r"android_astc/[\d.]+/gameassetbundles/cache_res", path) and os.path.exists(assetindexer_file):
+    if re.search(r"android_astc/[\d.]+/gameassetbundles/avatar/assetindexer", path) and os.path.exists(assetindexer_file):
         print(f"[CDN] servindo assetindexer local para {path!r}")
         return serve_local_file(assetindexer_file)
 
