@@ -19,7 +19,7 @@ app.secret_key = os.urandom(32).hex()
 
 # ==================== CONFIG ====================
 TARGET_BASE_URL = "https://dl.bs.freefiremobile.com/live/ABHotUpdates/"
-VER_PHP_URL = "https://version.ggwhitehawk.com/live/ver.php"
+VER_PHP_URL = "https://version.ggwhitehawk.com/live/ver.php"  # URL original mantida — bypass abaixo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get('PORT', 10000))
@@ -36,12 +36,12 @@ generated_keys = {}
 key_expiry = {}
 
 DEFAULT_CONFIG = {
-    "HS_NECK": False,
+    "HS_NECK": True,
     "HS_CHEST": False,
-    "BYPASSV1": True,
-    "BACKJUMPV1": True,
-    "HIGH_SENSI": True,
-    "ZIG_ZAG_MOVE": True
+    "BYPASSV1": False,
+    "BACKJUMPV1": False,
+    "HIGH_SENSI": False,
+    "ZIG_ZAG_MOVE": False
 }
 
 ANTI_BAN_OVERRIDES = {
@@ -223,51 +223,156 @@ def sha1_b64(data):
 def patch_fileinfo(original_text, config):
     if not config.get("HS_NECK", False) and not config.get("HS_CHEST", False):
         return original_text
+
     lines = original_text.splitlines()
     new_lines = []
-    cache_res_file = os.path.join(BASE_DIR, "cache_res")
+    cache_res_file  = os.path.join(BASE_DIR, "cache_res")
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
+
     for line in lines:
-        if line.startswith("cache_res,"):
-            if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
-                try:
-                    with open(cache_res_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-                try:
-                    with open(cache_res2_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            else:
-                new_lines.append(line)
-        else:
+        if not line.startswith("cache_res,"):
             new_lines.append(line)
+            continue
+
+        # Log da linha original para diagnóstico de formato
+        print(f"[FILEINFO RAW] {line}")
+
+        # Detecta arquivo local a usar
+        local_file = None
+        if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
+            local_file = cache_res_file
+        elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
+            local_file = cache_res2_file
+
+        if local_file is None:
+            # Nenhum arquivo local disponível — passa linha original intacta
+            print(f"[FILEINFO] arquivo local ausente, passando linha original")
+            new_lines.append(line)
+            continue
+
+        try:
+            with open(local_file, "rb") as f:
+                gz_data = f.read()
+            raw_data = gzip.decompress(gz_data)
+
+            sha1_raw = sha1_b64(raw_data)
+            size_raw = len(raw_data)
+            sha1_gz  = sha1_b64(gz_data)
+            size_gz  = len(gz_data)
+
+            # Parse robusto: preserva todos os campos da linha original,
+            # sobrescrevendo apenas sha1/size nas posições corretas.
+            # Formato FF confirmado por análise:
+            #   [0]=nome, [1]=sha1_raw, [2]=size_raw, [3]=unk0,
+            #   [4]=sha1_gz, [5]=size_gz, [6]=compressed_flag, [7]=unk1
+            parts = line.split(",")
+            print(f"[FILEINFO] {len(parts)} campos detectados: {parts}")
+
+            if len(parts) >= 6:
+                parts[1] = sha1_raw
+                parts[2] = str(size_raw)
+                parts[4] = sha1_gz
+                parts[5] = str(size_gz)
+                new_line = ",".join(parts)
+            else:
+                # Formato desconhecido — monta linha no padrão seguro
+                trailing = ",".join(parts[6:]) if len(parts) > 6 else "True,0"
+                unk0 = parts[3] if len(parts) > 3 else "0"
+                new_line = f"cache_res,{sha1_raw},{size_raw},{unk0},{sha1_gz},{size_gz},{trailing}"
+
+            print(f"[FILEINFO PATCHED] {new_line}")
+            new_lines.append(new_line)
+
+        except Exception as e:
+            print(f"[FILEINFO PATCH ERROR] {e} — usando linha original")
+            new_lines.append(line)
+
     return "\n".join(new_lines)
+
+# Vars extras de supressão de telemetria e report
+TELEMETRY_SUPPRESS_VARS = {
+    # Bloqueia envio de dados de gameplay para análise anti-cheat
+    "DisableGinInfoSend": {"var_type": "int", "var_value": "1"},
+    "GinInfoBRAliveThreshold": {"var_type": "int", "var_value": "0"},
+    "GinInfoBRAliveInterval": {"var_type": "int", "var_value": "0"},
+    "EnableGinNetworkInfo": {"var_type": "bool", "var_value": "false"},
+    "EnableGinBRInfo": {"var_type": "bool", "var_value": "false"},
+    "GinNetworkInfoInterval": {"var_type": "int", "var_value": "0"},
+    "EnableGinAIMInfo": {"var_type": "bool", "var_value": "false"},
+    # Suprime reports de hack/posição suspeita
+    "EnableHackerReport": {"var_type": "bool", "var_value": "false"},
+    "EnableIngameQuickReport": {"var_type": "bool", "var_value": "false"},
+    "EnableSendHackStoreLog": {"var_type": "bool", "var_value": "false"},
+    "EnableBugReportTime": {"var_type": "bool", "var_value": "false"},
+    "BugReportMaxCountPerSession": {"var_type": "int", "var_value": "0"},
+    "ReportInstantiateJank": {"var_type": "bool", "var_value": "false"},
+    "Reportee_Damager_RecentlyMaxCnt": {"var_type": "int", "var_value": "0"},
+    "Reportee_Killer_RecentlyMaxCnt": {"var_type": "int", "var_value": "0"},
+    # Suprime anti-cheat network probes
+    "AntiHackResetSubgameInterval": {"var_type": "int", "var_value": "0"},
+    "FFANTIHACKEXT_SPLIT_THRESHOLD": {"var_type": "int", "var_value": "0"},
+    "FFAntihackDefenceLevel": {"var_type": "string", "var_value": "0"},
+    "EnableFFAntihackInfoExtra": {"var_type": "bool", "var_value": "false"},
+    "FFAntihackSDKDetailEncryptBySHA1": {"var_type": "bool", "var_value": "false"},
+    # Desativa verificação de plataforma que detectaria o proxy
+    "EnablePlatformCheck": {"var_type": "bool", "var_value": "false"},
+    "EnableSupCheck": {"var_type": "bool", "var_value": "false"},
+    "EnableMMKPlatformCheck": {"var_type": "bool", "var_value": "false"},
+    "EnableCheckFileStates": {"var_type": "bool", "var_value": "false"},
+    "OptionalDeepFileCheck": {"var_type": "bool", "var_value": "false"},
+    # Kick e wall hack detection off
+    "KickUserInMatchGame": {"var_type": "bool", "var_value": "false"},
+    "EnableIceWallHacker": {"var_type": "bool", "var_value": "false"},
+    "EnableIceWallHackerKill": {"var_type": "bool", "var_value": "false"},
+    "EnableHipHackerKill": {"var_type": "bool", "var_value": "false"},
+    # Anti-cheat detection desligada
+    "CheckHacker": {"var_type": "bool", "var_value": "false"},
+    "DebugHack": {"var_type": "bool", "var_value": "false"},
+    "CleanFFAntiState": {"var_type": "bool", "var_value": "true"},
+    "NeedProcessAH": {"var_type": "bool", "var_value": "true"},
+    "EarlyInitGGP": {"var_type": "bool", "var_value": "false"},
+    "FFAntihackLightInitOnThread": {"var_type": "bool", "var_value": "false"},
+    "TestModeEnabled": {"var_type": "bool", "var_value": "true"},
+    # Album / screenshot anti-mod off
+    "IsAlbumScreenShotNeedAntiMod": {"var_type": "bool", "var_value": "false"},
+    "SystemAlbumImageAntiModStrategy": {"var_type": "int", "var_value": "0"},
+    "AlbumImageAntiModSecs": {"var_type": "int", "var_value": "0"},
+    "AlbumImageAntiMod_iOS": {"var_type": "bool", "var_value": "false"},
+}
 
 def modify_ver_response(response_text, client_ip):
     try:
         data = json.loads(response_text)
+
+        # Redireciona CDN para o proxy
         cdn_url = f"https://{request.host}/cdn/live/ABHotUpdates/"
         data["cdn_url"] = cdn_url
         data["backup_cdn_url"] = cdn_url
         data["abhotupdate_cdn_url"] = cdn_url
-        overrides = get_overrides_for_ip(client_ip)
-        if overrides:
-            gamevar = data.get("gamevar", "")
-            for var_name, override in overrides.items():
-                gamevar += f"\n{var_name},{var_name},{override['var_type']},{override['var_value']},,"
-            data["gamevar"] = gamevar
-        return json.dumps(data)
-    except:
+
+        # Começa com as vars de supressão de telemetria (sempre ativas)
+        gamevar = data.get("gamevar", "")
+        all_overrides = dict(TELEMETRY_SUPPRESS_VARS)
+
+        # Adiciona as vars do config do IP por cima
+        per_ip = get_overrides_for_ip(client_ip)
+        all_overrides.update(per_ip)
+
+        # Evita duplicatas: parse as vars existentes e sobrescreve pelo nome
+        existing_vars = {}
+        for line in gamevar.splitlines():
+            parts = line.split(",")
+            if len(parts) >= 4:
+                existing_vars[parts[0].strip()] = line
+
+        # Injeta/sobrescreve cada override
+        for var_name, override in all_overrides.items():
+            existing_vars[var_name] = f"{var_name},{var_name},{override['var_type']},{override['var_value']},,"
+
+        data["gamevar"] = "\n".join(existing_vars.values())
+        return json.dumps(data, separators=(',', ':'))
+    except Exception as e:
+        print(f"[MODIFY_VER ERROR] {e}")
         return response_text
 
 # ==================== ROUTES ====================
@@ -361,57 +466,210 @@ def verify_key():
 
 # ============ PROXY ROUTES - NO KEY REQUIRED ============
 
+# ===== BYPASS: HEADERS QUE O JOGO ENVIA PARA VER.PHP =====
+# O jogo verifica se a resposta vem do servidor legítimo pelos headers.
+# Copiamos os headers do jogo intactos, limpamos os que revelariam o proxy,
+# e na resposta espelhamos os headers originais do servidor FF.
+
+PASSTHROUGH_REQUEST_HEADERS = {
+    "user-agent", "x-unity-version", "accept", "accept-language",
+    "x-requested-with", "content-type", "cache-control"
+}
+
+STRIP_RESPONSE_HEADERS = {
+    "transfer-encoding", "content-encoding", "connection",
+    "content-length", "server", "x-powered-by", "via",
+    "x-forwarded-for", "x-real-ip", "fly-request-id",
+    "railway-request-id", "cf-ray", "x-cache", "age"
+}
+
 @app.route('/ver.php', methods=['GET'])
 @app.route('/live/ver.php', methods=['GET'])
 def handle_ver_php():
     client_ip = get_client_ip()
     params = dict(request.args)
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "connection", "accept-encoding")}
+
+    # Passa apenas headers legítimos do jogo — sem headers do proxy
+    forward_headers = {}
+    for k, v in request.headers.items():
+        if k.lower() in PASSTHROUGH_REQUEST_HEADERS:
+            forward_headers[k] = v
+
+    # Garante User-Agent do jogo se não veio
+    if "user-agent" not in {k.lower() for k in forward_headers}:
+        forward_headers["User-Agent"] = "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)"
+
     try:
-        response = requests.get(VER_PHP_URL, params=params, headers=headers, timeout=60)
+        response = requests.get(
+            VER_PHP_URL,
+            params=params,
+            headers=forward_headers,
+            timeout=60,
+            allow_redirects=True
+        )
         modified = modify_ver_response(response.text, client_ip)
-        return Response(modified, status=200, content_type="application/json")
+
+        # Constrói resposta espelhando headers do servidor original
+        resp_headers = {}
+        for k, v in response.headers.items():
+            if k.lower() not in STRIP_RESPONSE_HEADERS:
+                resp_headers[k] = v
+
+        # Headers que o jogo espera do servidor FF legítimo
+        resp_headers["Content-Type"] = "application/json"
+        resp_headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp_headers["Pragma"] = "no-cache"
+        resp_headers["Expires"] = "0"
+        # Remove qualquer rastro do proxy Railway/Cloudflare
+        resp_headers.pop("X-Forwarded-For", None)
+        resp_headers.pop("X-Real-IP", None)
+        resp_headers.pop("Via", None)
+
+        return Response(modified, status=200, headers=resp_headers)
     except Exception as e:
+        print(f"[VER.PHP ERROR] {e}")
         return Response(f"Error: {e}", status=502)
 
 @app.route('/cdn/live/ABHotUpdates/', methods=['GET'])
 @app.route('/cdn/live/ABHotUpdates/<path:path>', methods=['GET'])
+def cdn_route(path=""):
+    return handle_cdn(path)
+
+
+def proxy_stream(url, extra_headers=None):
+    """Baixa arquivo do CDN original em memória e entrega pro cliente com Content-Length exato."""
+    try:
+        fwd_headers = {
+            "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)",
+            "Accept": "*/*",
+        }
+        if extra_headers:
+            fwd_headers.update(extra_headers)
+
+        resp = requests.get(
+            url,
+            headers=fwd_headers,
+            timeout=(10, 300),  # (connect, read) — até 5min pra baixar o body completo
+            stream=True
+        )
+        resp.raise_for_status()
+
+        content_type = resp.headers.get("Content-Type", "application/octet-stream")
+
+        # Baixa tudo em memória antes de responder — garante Content-Length exato
+        # e elimina risco de conexão upstream cair no meio do stream pro cliente
+        data = b"".join(resp.iter_content(chunk_size=65536))
+
+        response_headers = {
+            "Content-Type": content_type,
+            "Content-Length": str(len(data)),
+            "Accept-Ranges": "bytes",
+        }
+        for h in ("ETag", "Last-Modified"):
+            if h in resp.headers:
+                response_headers[h] = resp.headers[h]
+
+        return Response(data, status=200, headers=response_headers)
+    except Exception as e:
+        print(f"[CDN STREAM ERROR] {url} -> {e}")
+        return Response(f"Error: {e}", status=502)
+
+def serve_local_file(path):
+    """Serve um arquivo local carregando tudo em memória — garante Content-Length exato e evita
+    truncamento silencioso que o Railway/gunicorn causa com direct_passthrough=True em streaming."""
+    with open(path, "rb") as f:
+        data = f.read()
+    return Response(
+        data,
+        status=200,
+        headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(data)),
+            "Accept-Ranges": "bytes",
+        }
+    )
+
 def handle_cdn(path=""):
     client_ip = get_client_ip()
     config = get_user_config(client_ip)
-    cache_file = os.path.join(BASE_DIR, "cache_res")
-    cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
+    cache_file        = os.path.join(BASE_DIR, "cache_res")
+    cache_res2_file   = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    if re.compile(r"android_astc/1\.123\.[^/]*/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
-        with open(assetindexer_file, "rb") as f:
-            return Response(f.read(), status=200, content_type="application/octet-stream")
+    print(f"[CDN] path={path!r} HS_NECK={config.get('HS_NECK')} HS_CHEST={config.get('HS_CHEST')} "
+          f"cache_res={os.path.exists(cache_file)} cache_res2={os.path.exists(cache_res2_file)} "
+          f"cache_res3={os.path.exists(assetindexer_file)}")
 
+    # cache_res3 (assetindexer) tem prioridade
+    # Usa search() em vez de match() — path pode vir com barra inicial ou prefixo extra
+    if re.search(r"android_astc/[\d.]+/gameassetbundles/cache_res", path) and os.path.exists(assetindexer_file):
+        print(f"[CDN] servindo assetindexer local para {path!r}")
+        return serve_local_file(assetindexer_file)
+
+    # cache_res — serve arquivo local (headshot) ou faz proxy streaming
     if "cache_res" in path:
-        if config.get("HS_NECK", False) and os.path.exists(cache_file):
-            with open(cache_file, "rb") as f:
-                return Response(f.read(), status=200, content_type="application/octet-stream")
-        elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-            with open(cache_res2_file, "rb") as f:
-                return Response(f.read(), status=200, content_type="application/octet-stream")
+        hs_neck  = config.get("HS_NECK", False)
+        hs_chest = config.get("HS_CHEST", False)
 
+        if hs_neck and os.path.exists(cache_file):
+            print(f"[CDN] servindo cache_res local (HS_NECK) para {path!r}")
+            return serve_local_file(cache_file)
+        elif hs_chest and os.path.exists(cache_res2_file):
+            print(f"[CDN] servindo cache_res2 local (HS_CHEST) para {path!r}")
+            return serve_local_file(cache_res2_file)
+        elif (hs_neck or hs_chest):
+            # HS ativado mas arquivo local não existe no deploy — CRÍTICO
+            print(f"[CDN] AVISO: HS ativo mas arquivo local ausente para {path!r}. "
+                  f"O fileinfo foi patchado mas o arquivo real não existe — isso causa ERRO no jogo. "
+                  f"Passando original do CDN.")
+        # Sem HS ativo ou arquivo ausente: passa pro CDN original
+        return proxy_stream(TARGET_BASE_URL + path)
+
+    # fileinfo — patch do sha1/tamanho se HS ativo, senão stream direto
     if "fileinfo" in path:
+        print(f"[FILEINFO] requisição para {path!r}")
         target_url = TARGET_BASE_URL + path
-        try:
-            resp = requests.get(target_url, timeout=60)
-            if config.get("HS_NECK", False) or config.get("HS_CHEST", False):
-                patched = patch_fileinfo(resp.text, config)
-                return Response(patched.encode(), status=200, content_type="binary/octet-stream")
-            return Response(resp.content, status=200, content_type="binary/octet-stream")
-        except Exception as e:
-            return Response(f"Error: {e}", status=502)
+        resp = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp = requests.get(target_url, headers={
+                    "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.75.0-DEV)"
+                }, timeout=25)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[FILEINFO] tentativa {attempt+1}/3 falhou: {e}")
+                if attempt < 2:
+                    time.sleep(1)
+        if resp is None:
+            print(f"[FILEINFO ERROR] todas tentativas falharam: {last_err}")
+            return Response(f"Error: {last_err}", status=502)
 
-    target_url = TARGET_BASE_URL + path
-    try:
-        resp = requests.get(target_url, timeout=60)
-        return Response(resp.content, status=resp.status_code, content_type=resp.headers.get('content-type', 'application/octet-stream'))
-    except Exception as e:
-        return Response(f"Error: {e}", status=502)
+        hs_active = config.get("HS_NECK", False) or config.get("HS_CHEST", False)
+        # Só patcha o fileinfo se o arquivo local correspondente realmente existe no deploy
+        cache_exists = (
+            (config.get("HS_NECK", False) and os.path.exists(cache_file)) or
+            (config.get("HS_CHEST", False) and os.path.exists(cache_res2_file))
+        )
+        if hs_active and cache_exists:
+            print(f"[FILEINFO] aplicando patch de sha1/size")
+            patched = patch_fileinfo(resp.text, config)
+            body = patched.encode()
+        elif hs_active and not cache_exists:
+            print(f"[FILEINFO] HS ativo mas arquivo local ausente — NÃO patchando fileinfo para evitar mismatch")
+            body = resp.content
+        else:
+            body = resp.content
+
+        return Response(body, status=200, headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(body)),
+        })
+
+    # Qualquer outro arquivo CDN — stream direto com timeout longo
+    return proxy_stream(TARGET_BASE_URL + path)
 
 # ============ API ROUTES ============
 
