@@ -223,34 +223,70 @@ def sha1_b64(data):
 def patch_fileinfo(original_text, config):
     if not config.get("HS_NECK", False) and not config.get("HS_CHEST", False):
         return original_text
+
     lines = original_text.splitlines()
     new_lines = []
-    cache_res_file = os.path.join(BASE_DIR, "cache_res")
+    cache_res_file  = os.path.join(BASE_DIR, "cache_res")
     cache_res2_file = os.path.join(BASE_DIR, "cache_res2")
+
     for line in lines:
-        if line.startswith("cache_res,"):
-            if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
-                try:
-                    with open(cache_res_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
-                try:
-                    with open(cache_res2_file, "rb") as f:
-                        gz_data = f.read()
-                    raw_data = gzip.decompress(gz_data)
-                    new_line = f"cache_res,{sha1_b64(raw_data)},{len(raw_data)},0,{sha1_b64(gz_data)},{len(gz_data)},True,0"
-                    new_lines.append(new_line)
-                except:
-                    new_lines.append(line)
-            else:
-                new_lines.append(line)
-        else:
+        if not line.startswith("cache_res,"):
             new_lines.append(line)
+            continue
+
+        # Log da linha original para diagnóstico de formato
+        print(f"[FILEINFO RAW] {line}")
+
+        # Detecta arquivo local a usar
+        local_file = None
+        if config.get("HS_NECK", False) and os.path.exists(cache_res_file):
+            local_file = cache_res_file
+        elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
+            local_file = cache_res2_file
+
+        if local_file is None:
+            # Nenhum arquivo local disponível — passa linha original intacta
+            print(f"[FILEINFO] arquivo local ausente, passando linha original")
+            new_lines.append(line)
+            continue
+
+        try:
+            with open(local_file, "rb") as f:
+                gz_data = f.read()
+            raw_data = gzip.decompress(gz_data)
+
+            sha1_raw = sha1_b64(raw_data)
+            size_raw = len(raw_data)
+            sha1_gz  = sha1_b64(gz_data)
+            size_gz  = len(gz_data)
+
+            # Parse robusto: preserva todos os campos da linha original,
+            # sobrescrevendo apenas sha1/size nas posições corretas.
+            # Formato FF confirmado por análise:
+            #   [0]=nome, [1]=sha1_raw, [2]=size_raw, [3]=unk0,
+            #   [4]=sha1_gz, [5]=size_gz, [6]=compressed_flag, [7]=unk1
+            parts = line.split(",")
+            print(f"[FILEINFO] {len(parts)} campos detectados: {parts}")
+
+            if len(parts) >= 6:
+                parts[1] = sha1_raw
+                parts[2] = str(size_raw)
+                parts[4] = sha1_gz
+                parts[5] = str(size_gz)
+                new_line = ",".join(parts)
+            else:
+                # Formato desconhecido — monta linha no padrão seguro
+                trailing = ",".join(parts[6:]) if len(parts) > 6 else "True,0"
+                unk0 = parts[3] if len(parts) > 3 else "0"
+                new_line = f"cache_res,{sha1_raw},{size_raw},{unk0},{sha1_gz},{size_gz},{trailing}"
+
+            print(f"[FILEINFO PATCHED] {new_line}")
+            new_lines.append(new_line)
+
+        except Exception as e:
+            print(f"[FILEINFO PATCH ERROR] {e} — usando linha original")
+            new_lines.append(line)
+
     return "\n".join(new_lines)
 
 # Vars extras de supressão de telemetria e report
@@ -560,21 +596,38 @@ def handle_cdn(path=""):
     cache_res2_file   = os.path.join(BASE_DIR, "cache_res2")
     assetindexer_file = os.path.join(BASE_DIR, "cache_res3")
 
-    # cache_res3 (assetindexer) tem prioridade — regex genérico, funciona em qualquer versão
-    if re.compile(r"android_astc/[\d.]+/gameassetbundles/cache_res").match(path) and os.path.exists(assetindexer_file):
+    print(f"[CDN] path={path!r} HS_NECK={config.get('HS_NECK')} HS_CHEST={config.get('HS_CHEST')} "
+          f"cache_res={os.path.exists(cache_file)} cache_res2={os.path.exists(cache_res2_file)} "
+          f"cache_res3={os.path.exists(assetindexer_file)}")
+
+    # cache_res3 (assetindexer) tem prioridade
+    # Usa search() em vez de match() — path pode vir com barra inicial ou prefixo extra
+    if re.search(r"android_astc/[\d.]+/gameassetbundles/cache_res", path) and os.path.exists(assetindexer_file):
+        print(f"[CDN] servindo assetindexer local para {path!r}")
         return serve_local_file(assetindexer_file)
 
     # cache_res — serve arquivo local (headshot) ou faz proxy streaming
     if "cache_res" in path:
-        if config.get("HS_NECK", False) and os.path.exists(cache_file):
+        hs_neck  = config.get("HS_NECK", False)
+        hs_chest = config.get("HS_CHEST", False)
+
+        if hs_neck and os.path.exists(cache_file):
+            print(f"[CDN] servindo cache_res local (HS_NECK) para {path!r}")
             return serve_local_file(cache_file)
-        elif config.get("HS_CHEST", False) and os.path.exists(cache_res2_file):
+        elif hs_chest and os.path.exists(cache_res2_file):
+            print(f"[CDN] servindo cache_res2 local (HS_CHEST) para {path!r}")
             return serve_local_file(cache_res2_file)
-        # Se nenhum HS ativo, deixa passar pro CDN original via stream
+        elif (hs_neck or hs_chest):
+            # HS ativado mas arquivo local não existe no deploy — CRÍTICO
+            print(f"[CDN] AVISO: HS ativo mas arquivo local ausente para {path!r}. "
+                  f"O fileinfo foi patchado mas o arquivo real não existe — isso causa ERRO no jogo. "
+                  f"Passando original do CDN.")
+        # Sem HS ativo ou arquivo ausente: passa pro CDN original
         return proxy_stream(TARGET_BASE_URL + path)
 
     # fileinfo — patch do sha1/tamanho se HS ativo, senão stream direto
     if "fileinfo" in path:
+        print(f"[FILEINFO] requisição para {path!r}")
         target_url = TARGET_BASE_URL + path
         resp = None
         last_err = None
@@ -593,11 +646,23 @@ def handle_cdn(path=""):
         if resp is None:
             print(f"[FILEINFO ERROR] todas tentativas falharam: {last_err}")
             return Response(f"Error: {last_err}", status=502)
-        if config.get("HS_NECK", False) or config.get("HS_CHEST", False):
+
+        hs_active = config.get("HS_NECK", False) or config.get("HS_CHEST", False)
+        # Só patcha o fileinfo se o arquivo local correspondente realmente existe no deploy
+        cache_exists = (
+            (config.get("HS_NECK", False) and os.path.exists(cache_file)) or
+            (config.get("HS_CHEST", False) and os.path.exists(cache_res2_file))
+        )
+        if hs_active and cache_exists:
+            print(f"[FILEINFO] aplicando patch de sha1/size")
             patched = patch_fileinfo(resp.text, config)
             body = patched.encode()
+        elif hs_active and not cache_exists:
+            print(f"[FILEINFO] HS ativo mas arquivo local ausente — NÃO patchando fileinfo para evitar mismatch")
+            body = resp.content
         else:
             body = resp.content
+
         return Response(body, status=200, headers={
             "Content-Type": "application/octet-stream",
             "Content-Length": str(len(body)),
